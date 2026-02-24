@@ -3,7 +3,8 @@ package com.example.spacer.network
 import android.content.Context
 
 class SessionPrefs(context: Context) {
-    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun isLoggedIn(): Boolean = prefs.getBoolean(KEY_LOGGED_IN, false)
 
@@ -21,6 +22,13 @@ class SessionPrefs(context: Context) {
                 .putInt(KEY_FRIENDS_COUNT, 0)
                 .putBoolean(KEY_CALENDAR_SHARING, true)
                 .putBoolean(KEY_CALENDAR_CONFLICT_NOTIFY, false)
+                .putBoolean(KEY_DEVICE_CALENDAR_READ, false)
+                .putBoolean(KEY_DARK_THEME, true)
+                .putString(KEY_PRESENCE_STATUS, "offline")
+                .apply()
+            appContext.getSharedPreferences("calendar_conflict_notifications", Context.MODE_PRIVATE)
+                .edit()
+                .clear()
                 .apply()
         }
     }
@@ -42,6 +50,12 @@ class SessionPrefs(context: Context) {
     }
 
     fun getProfileImageUri(): String? = prefs.getString(KEY_PROFILE_IMAGE_URI, null)
+
+    fun savePresenceStatus(status: String) {
+        prefs.edit().putString(KEY_PRESENCE_STATUS, status).apply()
+    }
+
+    fun getPresenceStatus(): String = prefs.getString(KEY_PRESENCE_STATUS, "offline") ?: "offline"
 
     fun saveLocationLabel(location: String) {
         prefs.edit().putString(KEY_LOCATION_LABEL, location).apply()
@@ -120,6 +134,27 @@ class SessionPrefs(context: Context) {
         prefs.edit().putBoolean(KEY_CALENDAR_CONFLICT_NOTIFY, value).apply()
     }
 
+    /**
+     * When true, the user asked to read on-device calendars (Google, etc.) for busy/free overlap checks.
+     * Actual reads require [android.Manifest.permission.READ_CALENDAR] at runtime.
+     */
+    fun isDeviceCalendarReadEnabled(): Boolean =
+        prefs.getBoolean(KEY_DEVICE_CALENDAR_READ, false)
+
+    fun setDeviceCalendarReadEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_DEVICE_CALENDAR_READ, value).apply()
+        if (!value) {
+            prefs.edit().putBoolean(KEY_CALENDAR_CONFLICT_NOTIFY, false).apply()
+        }
+    }
+
+    fun isDarkThemeEnabled(): Boolean =
+        prefs.getBoolean(KEY_DARK_THEME, true)
+
+    fun setDarkThemeEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_DARK_THEME, value).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "spacer_session"
         private const val KEY_LOGGED_IN = "logged_in"
@@ -132,5 +167,8 @@ class SessionPrefs(context: Context) {
         private const val KEY_FRIENDS_COUNT = "friends_count"
         private const val KEY_CALENDAR_SHARING = "calendar_availability_sharing_enabled"
         private const val KEY_CALENDAR_CONFLICT_NOTIFY = "calendar_conflict_notifications_enabled"
+        private const val KEY_DEVICE_CALENDAR_READ = "device_calendar_read_enabled"
+        private const val KEY_DARK_THEME = "dark_theme_enabled"
+        private const val KEY_PRESENCE_STATUS = "presence_status"
     }
 }
