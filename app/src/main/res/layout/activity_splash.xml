@@ -1,0 +1,27 @@
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/splashRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/splash_gradient"
+    android:gravity="center">
+
+    <View
+        android:id="@+id/glow"
+        android:layout_width="220dp"
+        android:layout_height="220dp"
+        android:background="@drawable/glow_circle"
+        android:alpha="0"
+        android:layout_centerInParent="true" />
+
+    <ImageView
+        android:id="@+id/logo"
+        android:layout_width="170dp"
+        android:layout_height="170dp"
+        android:src="@drawable/s_logo"
+        android:layout_centerInParent="true"
+        android:alpha="0"
+        android:scaleX="0.25"
+        android:scaleY="0.25" />
+
+</RelativeLayout>
