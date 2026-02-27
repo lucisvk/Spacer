@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0B1020"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:gravity="center_horizontal">
+
+        <ImageView
+            android:id="@+id/createLogo"
+            android:layout_width="90dp"
+            android:layout_height="90dp"
+            android:src="@drawable/s_logo"
+            android:layout_marginTop="18dp"
+            android:layout_marginBottom="14dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Create account"
+            android:textColor="#FFFFFF"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Join Spacer to start planning"
+            android:textColor="#B8C1CC"
+            android:textSize="14sp"
+            android:layout_marginBottom="22dp" />
+
+        <EditText
+            android:id="@+id/etName"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:hint="Full name"
+            android:inputType="textPersonName"
+            android:padding="14dp"
+            android:background="@android:drawable/edit_text"
+            android:autofillHints="name"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#7A8699"
+            android:layout_marginBottom="12dp" />
+
+        <EditText
+            android:id="@+id/etEmail"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:hint="Email"
+            android:inputType="textEmailAddress"
+            android:padding="14dp"
+            android:background="@android:drawable/edit_text"
+            android:autofillHints="emailAddress"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#7A8699"
+            android:layout_marginBottom="12dp" />
+
+        <EditText
+            android:id="@+id/etPassword"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:hint="Password (min 6 chars)"
+            android:inputType="textPassword"
+            android:padding="14dp"
+            android:background="@android:drawable/edit_text"
+            android:autofillHints="newPassword"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#7A8699"
+            android:layout_marginBottom="12dp" />
+
+        <EditText
+            android:id="@+id/etConfirmPassword"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:hint="Confirm password"
+            android:inputType="textPassword"
+            android:padding="14dp"
+            android:background="@android:drawable/edit_text"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#7A8699"
+            android:layout_marginBottom="18dp" />
+
+        <Button
+            android:id="@+id/btnCreateAccount"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:text="Create Account"
+            android:textAllCaps="false"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/tvBackToLogin"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Already have an account? Log in"
+            android:textColor="#B8C1CC"
+            android:textSize="14sp"
+            android:layout_marginTop="18dp"
+            android:padding="8dp" />
+
+    </LinearLayout>
+
+</ScrollView>
