@@ -1,6 +1,7 @@
 package com.example.spacer
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -49,9 +51,16 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.spacer.network.AuthRepository
+import com.example.spacer.network.LoginRequest
+import com.example.spacer.network.SignupRequest
 import com.example.spacer.ui.theme.SpacerTheme
-import com.example.spacer.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
 
 private object Routes {
     const val Splash = "splash"
@@ -146,7 +155,6 @@ private fun SplashScreen(
 
     LaunchedEffect(Unit) {
         startAnimation = true
-        // Give the splash a minute before heading to login.
         delay(1600)
         onFinished()
     }
@@ -158,7 +166,6 @@ private fun SplashScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-
         Icon(
             painter = painterResource(id = R.drawable.spacer_logo),
             contentDescription = "Spacer logo",
@@ -190,6 +197,9 @@ private fun LoginScreen(
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+
+    val context = LocalContext.current
+    val authRepository = remember { AuthRepository() }
 
     Box(
         modifier = modifier
@@ -280,7 +290,41 @@ private fun LoginScreen(
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
                     onClick = {
-                        // Node.js auth endpoint.
+                        CoroutineScope(Dispatchers.IO).launch {
+                            try {
+                                val response = authRepository.login(
+                                    LoginRequest(
+                                        email = email.trim(),
+                                        password = password
+                                    )
+                                )
+
+                                withContext(Dispatchers.Main) {
+                                    if (response.isSuccessful && response.body() != null) {
+                                        val body = response.body()!!
+                                        Toast.makeText(
+                                            context,
+                                            "Welcome ${body.user.username}",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            "Login failed: ${response.code()}",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(
+                                        context,
+                                        "Error: ${e.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                        }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -301,9 +345,8 @@ private fun LoginScreen(
                         .padding(bottom = 12.dp)
                 )
 
-                // third party buttons.
                 OutlinedButton(
-                    onClick = { /* Google OAuth hook */ },
+                    onClick = { },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
@@ -319,7 +362,7 @@ private fun LoginScreen(
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedButton(
-                    onClick = { /* Discord OAuth hook */ },
+                    onClick = { },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
@@ -335,7 +378,7 @@ private fun LoginScreen(
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedButton(
-                    onClick = { /* GitHub OAuth hook */ },
+                    onClick = { },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
@@ -380,8 +423,8 @@ private fun CreateAccountScreen(
     var dateOfBirth by remember { mutableStateOf("") }
     var allowUpdates by remember { mutableStateOf(true) }
 
-
-
+    val context = LocalContext.current
+    val authRepository = remember { AuthRepository() }
 
     Column(
         modifier = modifier
@@ -479,7 +522,53 @@ private fun CreateAccountScreen(
         Column {
             Button(
                 onClick = {
-                    // Call Node.js signup endpoint here.
+                    if (password != confirmPassword) {
+                        Toast.makeText(context, "Passwords do not match", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+
+                    val nameParts = name.trim().split(" ", limit = 2)
+                    val firstName = nameParts.getOrNull(0)
+                    val lastName = nameParts.getOrNull(1)
+
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val response = authRepository.signup(
+                                SignupRequest(
+                                    username = username.trim(),
+                                    email = email.trim(),
+                                    password = password,
+                                    first_name = firstName,
+                                    last_name = lastName
+                                )
+                            )
+
+                            withContext(Dispatchers.Main) {
+                                if (response.isSuccessful && response.body() != null) {
+                                    Toast.makeText(
+                                        context,
+                                        "Account created successfully",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    onBackToLoginClick()
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "Signup failed: ${response.code()}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(
+                                    context,
+                                    "Error: ${e.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -508,6 +597,7 @@ private fun ForgotPasswordScreen(
     modifier: Modifier = Modifier
 ) {
     var email by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
     Column(
         modifier = modifier
@@ -539,7 +629,11 @@ private fun ForgotPasswordScreen(
         Column {
             Button(
                 onClick = {
-                    // password reset through the backend.
+                    Toast.makeText(
+                        context,
+                        "Forgot password endpoint not added yet",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 },
                 modifier = Modifier
                     .fillMaxWidth()
