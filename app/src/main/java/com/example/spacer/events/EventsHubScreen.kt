@@ -18,6 +18,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -44,11 +45,13 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import coil.compose.AsyncImage
 import com.example.spacer.Navigation.AppRoutes
 import com.example.spacer.location.PlacesRepository
+import com.example.spacer.network.SessionPrefs
 import com.example.spacer.profile.EventRow
 import com.example.spacer.social.FindPeopleScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 private val tabs = listOf("Invites & hosting", "Find people")
 
@@ -68,6 +71,7 @@ fun EventsHubScreen(
     val eventRepo = remember { EventRepository() }
     val placesRepo = remember { PlacesRepository() }
     val notificationsRepo = remember { NotificationsRepository() }
+    val sessionPrefs = remember { SessionPrefs(context) }
 
     var pending by remember { mutableStateOf<List<PendingInviteUi>>(emptyList()) }
     var myEvents by remember { mutableStateOf<List<MyEventHubItem>>(emptyList()) }
@@ -78,49 +82,69 @@ fun EventsHubScreen(
     val innerRoute by innerEventsNav.currentBackStackEntryAsState()
 
     suspend fun loadHubLists() {
+        val demoEventId = "demo-local-event-1"
         loading = true
-        withContext(Dispatchers.IO) {
-            eventRepo.listPendingInvites()
-        }.onSuccess { pending = it }
-            .onFailure {
-                Toast.makeText(context, "We couldn't load your invitations right now. Please try again.", Toast.LENGTH_LONG).show()
+        try {
+            withContext(Dispatchers.IO) {
+                eventRepo.listPendingInvites()
+            }.onSuccess {
+                pending = it.filterNot { inv -> inv.eventId.startsWith("demo-") && inv.eventId != demoEventId }
             }
-        withContext(Dispatchers.IO) {
-            eventRepo.listMyHostingAndAttendingEvents()
-        }.onSuccess { myEvents = it }
-            .onFailure {
-                Toast.makeText(context, "We couldn't load your events right now. Please try again.", Toast.LENGTH_LONG).show()
+                .onFailure {
+                    Toast.makeText(context, "We couldn't load your invitations right now. Please try again.", Toast.LENGTH_LONG).show()
+                }
+            withContext(Dispatchers.IO) {
+                eventRepo.listMyHostingAndAttendingEvents()
+            }.onSuccess {
+                myEvents = it.filterNot { item -> item.event.id.startsWith("demo-") && item.event.id != demoEventId }
             }
-        withContext(Dispatchers.IO) {
-            eventRepo.listPublicDiscoverableEvents()
-        }.onSuccess { publicEvents = it }
-
-        val eventLocations = (myEvents.map { it.event.id to (it.event.location ?: "") } +
-            pending.map { it.eventId to (it.location ?: "") } +
-            publicEvents.map { it.id to (it.location ?: "") })
-            .distinctBy { it.first }
-            .filter { it.second.isNotBlank() }
-        eventPhotoUrls = withContext(Dispatchers.IO) {
-            eventLocations.mapNotNull { (eventId, location) ->
-                val photoName = placesRepo.searchText(location)
-                    .getOrDefault(emptyList())
-                    .firstOrNull()
-                    ?.primaryPhotoName
-                val url = photoName?.let { placesRepo.photoMediaUrl(it, 350) }
-                if (url != null) eventId to url else null
-            }.toMap()
-        }
-        val unread = withContext(Dispatchers.IO) { notificationsRepo.listUnread() }.getOrDefault(emptyList())
-        if (unread.isNotEmpty()) {
-            val summary = unread.joinToString("\n") { n -> "${n.title}: ${n.body}" }.take(800)
-            withContext(Dispatchers.Main) {
-                Toast.makeText(context, summary, Toast.LENGTH_LONG).show()
+                .onFailure {
+                    Toast.makeText(context, "We couldn't load your events right now. Please try again.", Toast.LENGTH_LONG).show()
+                }
+            val demo = withContext(Dispatchers.IO) { eventRepo.getEvent(demoEventId) }.getOrNull()
+            if (demo != null) {
+                myEvents = listOf(MyEventHubItem(event = demo, isHosting = true)) +
+                    myEvents.filterNot { it.event.id == demoEventId }
             }
             withContext(Dispatchers.IO) {
-                unread.forEach { notificationsRepo.markRead(it.id) }
+                eventRepo.listPublicDiscoverableEvents()
+            }.onSuccess {
+                val stateCode = extractUsStateCode(sessionPrefs.getLocationLabel())
+                val cleaned = it.filterNot { ev -> ev.id.startsWith("demo-") && ev.id != demoEventId }
+                publicEvents = if (stateCode == null) cleaned else cleaned.filter { ev ->
+                    val eventState = extractUsStateCode(ev.location)
+                    eventState == null || eventState == stateCode
+                }
             }
+            // Optional enrichments should never block base event lists on other devices.
+            runCatching {
+                val eventLocations = (myEvents.map { it.event.id to (it.event.location ?: "") } +
+                    pending.map { it.eventId to (it.location ?: "") } +
+                    publicEvents.map { it.id to (it.location ?: "") })
+                    .distinctBy { it.first }
+                    .filter { it.second.isNotBlank() }
+                eventPhotoUrls = withContext(Dispatchers.IO) {
+                    if (!PlacesRepository.isApiKeyConfigured()) return@withContext emptyMap()
+                    eventLocations.mapNotNull { (eventId, location) ->
+                        val photoName = runCatching {
+                            placesRepo.searchText(location)
+                                .getOrDefault(emptyList())
+                                .firstOrNull()
+                                ?.primaryPhotoName
+                        }.getOrNull()
+                        val url = photoName?.let { placesRepo.photoMediaUrl(it, 350) }
+                        if (url != null) eventId to url else null
+                    }.toMap()
+                }
+            }
+            runCatching {
+                UserNotificationDispatcher.flushUnreadToPhone(context, notificationsRepo)
+            }
+        } catch (_: Exception) {
+            Toast.makeText(context, "Events are temporarily unavailable. Please retry.", Toast.LENGTH_SHORT).show()
+        } finally {
+            loading = false
         }
-        loading = false
     }
 
     LaunchedEffect(innerRoute?.destination?.route, tabIndex) {
@@ -140,31 +164,47 @@ fun EventsHubScreen(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        ScrollableTabRow(selectedTabIndex = tabIndex) {
-            tabs.forEachIndexed { index, title ->
-                Tab(
-                    selected = index == tabIndex,
-                    onClick = { tabIndex = index },
-                    text = { Text(title) }
-                )
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)
+        ) {
+            Column {
+                ScrollableTabRow(selectedTabIndex = tabIndex) {
+                    tabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = index == tabIndex,
+                            onClick = { tabIndex = index },
+                            text = { Text(title) }
+                        )
+                    }
+                }
+                when (tabIndex) {
+                    0 -> InvitesHostingTab(
+                        loading = loading,
+                        pending = pending,
+                        myEvents = myEvents,
+                        publicEvents = publicEvents,
+                        eventPhotoUrls = eventPhotoUrls,
+                        onOpenInvite = onOpenInvite,
+                        onOpenHostEvent = onOpenHostEvent
+                    )
+                    1 -> FindPeopleScreen(
+                        onOpenProfile = onOpenPublicProfile,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
-        when (tabIndex) {
-            0 -> InvitesHostingTab(
-                loading = loading,
-                pending = pending,
-                myEvents = myEvents,
-                publicEvents = publicEvents,
-                eventPhotoUrls = eventPhotoUrls,
-                onOpenInvite = onOpenInvite,
-                onOpenHostEvent = onOpenHostEvent
-            )
-            1 -> FindPeopleScreen(
-                onOpenProfile = onOpenPublicProfile,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
     }
+}
+
+private fun extractUsStateCode(value: String?): String? {
+    val raw = value?.uppercase(Locale.US) ?: return null
+    val match = Regex("\\b([A-Z]{2})\\s+\\d{5}(?:-\\d{4})?\\b").find(raw)
+    return match?.groupValues?.getOrNull(1)
 }
 
 @Composable
@@ -184,16 +224,27 @@ private fun InvitesHostingTab(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text(
-                "Your events",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-            Text(
-                "Newest first. Showing your latest 6.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "Your events",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Text(
+                        "Newest first · showing latest 6",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                    )
+                }
+                OutlinedButton(onClick = { /* Keep existing nav flow unchanged */ }) {
+                    Text("+ New event")
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
         }
         if (loading) {
             item { Text("Loading…") }
@@ -206,7 +257,7 @@ private fun InvitesHostingTab(
                 )
             }
         } else {
-            items(myEvents.take(6), key = { it.event.id }) { item ->
+            items(myEvents.take(6), key = { "my-${it.event.id}" }) { item ->
                 val ev = item.event
                 Card(
                     modifier = Modifier
@@ -239,6 +290,19 @@ private fun InvitesHostingTab(
                             ) {
                                 Text(ev.title, fontWeight = FontWeight.SemiBold)
                                 RoleChip(isHosting = item.isHosting)
+                                if (ev.id == "demo-local-event-1") {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f)
+                                    ) {
+                                        Text(
+                                            "Offline Demo",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
                             }
                             Text(formatEventDateNoTime(ev.startsAt), style = MaterialTheme.typography.bodySmall)
                             ev.location?.takeIf { it.isNotBlank() }?.let {
@@ -272,7 +336,7 @@ private fun InvitesHostingTab(
                 )
             }
         } else if (!loading) {
-            items(publicEvents.take(6), key = { it.id }) { ev ->
+            items(publicEvents.take(6), key = { "public-${it.id}" }) { ev ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -328,19 +392,38 @@ private fun InvitesHostingTab(
                 "Pending invitations",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
+            Text(
+                "When a host adds you, invitations appear here",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+            )
             Spacer(modifier = Modifier.height(4.dp))
         }
 
         if (!loading && pending.isEmpty()) {
             item {
-                Text(
-                    "No pending invites. When a host adds you, invitations appear here.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
-                )
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 22.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("✉", style = MaterialTheme.typography.titleLarge)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "No pending invites",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                        )
+                    }
+                }
             }
         } else {
-            items(pending, key = { it.inviteId }) { inv ->
+            items(pending, key = { "pending-${it.inviteId}" }) { inv ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -388,3 +471,4 @@ private fun RoleChip(isHosting: Boolean) {
         )
     }
 }
+
