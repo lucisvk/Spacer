@@ -2,7 +2,6 @@ package com.example.spacer.network
 
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
-import io.github.jan.supabase.postgrest.from
 
 class AuthRepository {
 
@@ -47,6 +46,32 @@ class AuthRepository {
             }
 
             Result.failure(Exception(message))
+        }
+    }
+
+    suspend fun resolveCurrentDisplayName(): String? {
+        return try {
+            val user = supabase.auth.currentUserOrNull() ?: return null
+
+            val metadataName = user.userMetadata
+                ?.get("name")
+                ?.toString()
+                ?.trim('"')
+                ?.takeIf { it.isNotBlank() }
+
+            val fullName = user.userMetadata
+                ?.get("full_name")
+                ?.toString()
+                ?.trim('"')
+                ?.takeIf { it.isNotBlank() }
+
+            val emailPrefix = user.email
+                ?.substringBefore("@")
+                ?.takeIf { it.isNotBlank() }
+
+            metadataName ?: fullName ?: emailPrefix
+        } catch (_: Exception) {
+            null
         }
     }
 }
