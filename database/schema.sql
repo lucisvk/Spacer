@@ -1,3 +1,8 @@
+-- Example schema for local base testing before uploading
+-- to be handled by home server and supabase.
+
+
+
 -- Core profile row keyed by Supabase auth user id.
 create table if not exists public.profiles (
     id uuid primary key references auth.users(id) on delete cascade,

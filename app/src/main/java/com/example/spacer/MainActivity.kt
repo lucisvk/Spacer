@@ -81,7 +81,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val startupSessionPrefs = SessionPrefs(this)
 
-        // OAuth providers return to this deep link. We mark session as logged in so splash can route to app.
+        // OAuth providers return to this deep link. and will mark session as logged in so splash can route to app
+        // unless the user is already logged in and has a profile set up.
         if (intent?.data?.toString()?.startsWith("spacer://auth") == true) {
             startupSessionPrefs.setLoggedIn(true)
         }
@@ -371,7 +372,8 @@ private fun LoginScreen(
                     .padding(bottom = 12.dp)
             )
 
-            // OAuth provider buttons are kept in place for third-party sign-in.
+            // OAuth provider buttons are kept in place for third-party sign-in as this will be
+            // handled through supabase.
             OutlinedButton(
                 onClick = { launchOAuthLogin(context, "google") },
                 modifier = Modifier
