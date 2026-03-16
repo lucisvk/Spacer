@@ -17,6 +17,18 @@ fun localProp(name: String, fallback: String = ""): String {
     return localProperties.getProperty(name, fallback)
 }
 
+fun secret(name: String): String {
+    // Resolution order:
+    // 1) local.properties
+    // 2) Gradle property (-P or gradle.properties)
+    // 3) environment variable
+    return localProp(name).ifBlank {
+        (findProperty(name) as? String).orEmpty().ifBlank {
+            System.getenv(name).orEmpty()
+        }
+    }
+}
+
 fun asBuildConfigString(value: String): String {
     return "\"${value.replace("\"", "\\\"")}\""
 }
@@ -37,25 +49,32 @@ android {
         buildConfigField(
             "String",
             "SUPABASE_URL",
-            asBuildConfigString(localProp("SUPABASE_URL", ""))
+            asBuildConfigString(secret("SUPABASE_URL"))
         )
 
         buildConfigField(
             "String",
             "SUPABASE_KEY",
-            asBuildConfigString(localProp("SUPABASE_KEY", ""))
+            asBuildConfigString(secret("SUPABASE_KEY"))
         )
 
         buildConfigField(
             "String",
             "GOOGLE_WEB_CLIENT_ID",
-            asBuildConfigString(localProp("GOOGLE_WEB_CLIENT_ID", ""))
+            asBuildConfigString(secret("GOOGLE_WEB_CLIENT_ID"))
         )
 
         buildConfigField(
             "String",
             "DISCORD_CLIENT_ID",
-            asBuildConfigString(localProp("DISCORD_CLIENT_ID", ""))
+            asBuildConfigString(secret("DISCORD_CLIENT_ID"))
+        )
+
+        // Google Cloud: enable "Places API (New)" and restrict key to Android + Places.
+        buildConfigField(
+            "String",
+            "PLACES_API_KEY",
+            asBuildConfigString(secret("PLACES_API_KEY"))
         )
     }
 
@@ -86,6 +105,8 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.github.jan-tennert.supabase:storage-kt")
     implementation("io.ktor:ktor-client-android:3.0.3")
+    implementation("io.ktor:ktor-client-content-negotiation:3.0.3")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")

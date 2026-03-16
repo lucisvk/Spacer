@@ -50,3 +50,10 @@ docker-compose.override.yml
 # =========================
 .DS_Store
 Thumbs.db
+
+# Assistant / IDE tooling (keep out of repo)
+.agents/
+.claude/
+.junie/
+.cursor/
+skills-lock.json
