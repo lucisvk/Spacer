@@ -1,7 +1,6 @@
 package com.example.spacer
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -36,9 +35,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,9 +59,15 @@ import androidx.navigation.compose.rememberNavController
 import com.example.spacer.Navigation.SpacerAppScaffold
 import com.example.spacer.network.AuthRepository
 import com.example.spacer.network.LoginRequest
-import com.example.spacer.network.SessionPrefs
 import com.example.spacer.network.SignupRequest
+import com.example.spacer.network.SupabaseManager
 import com.example.spacer.ui.theme.SpacerTheme
+import io.github.jan.supabase.auth.handleDeeplinks
+import io.github.jan.supabase.auth.providers.Discord
+import io.github.jan.supabase.auth.providers.Github
+import io.github.jan.supabase.auth.providers.Google
+import io.github.jan.supabase.auth.status.SessionStatus
+import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -79,17 +86,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val startupSessionPrefs = SessionPrefs(this)
-
-        // OAuth providers return to this deep link. and will mark session as logged in so splash can route to app
-        // unless the user is already logged in and has a profile set up.
-        if (intent?.data?.toString()?.startsWith("spacer://auth") == true) {
-            startupSessionPrefs.setLoggedIn(true)
-        }
+        // Required for OAuth + OTP links on Android when using deeplinks.
+        SupabaseManager.client.handleDeeplinks(intent)
 
         setContent {
             var isDarkTheme by remember { mutableStateOf(true) }
-            val sessionPrefs = remember { SessionPrefs(this) }
 
             SpacerTheme(darkTheme = isDarkTheme) {
                 val navController = rememberNavController()
@@ -99,12 +100,18 @@ class MainActivity : ComponentActivity() {
                         navController = navController,
                         isDarkTheme = isDarkTheme,
                         onToggleTheme = { isDarkTheme = !isDarkTheme },
-                        sessionPrefs = sessionPrefs,
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // Required when OAuth callback returns while activity already exists.
+        SupabaseManager.client.handleDeeplinks(intent)
     }
 }
 
@@ -113,7 +120,6 @@ private fun SpacerNavHost(
     navController: NavHostController,
     isDarkTheme: Boolean,
     onToggleTheme: () -> Unit,
-    sessionPrefs: SessionPrefs,
     modifier: Modifier = Modifier
 ) {
     val authRepository = remember { AuthRepository() }
@@ -124,16 +130,11 @@ private fun SpacerNavHost(
         modifier = modifier
     ) {
         composable(Routes.Splash) {
+            val sessionStatus by SupabaseManager.client.auth.sessionStatus.collectAsState()
+
             SplashScreen(
-                onFinished = {
-                    if (sessionPrefs.isLoggedIn() && sessionPrefs.getProfileName().isBlank()) {
-                        CoroutineScope(Dispatchers.IO).launch {
-                            authRepository.resolveCurrentDisplayName()?.let {
-                                sessionPrefs.saveProfileName(it)
-                            }
-                        }
-                    }
-                    val nextRoute = if (sessionPrefs.isLoggedIn()) Routes.App else Routes.Login
+                sessionStatus = sessionStatus,
+                onRouteReady = { nextRoute ->
                     navController.navigate(nextRoute) {
                         popUpTo(Routes.Splash) { inclusive = true }
                     }
@@ -148,7 +149,6 @@ private fun SpacerNavHost(
                 isDarkTheme = isDarkTheme,
                 onToggleTheme = onToggleTheme,
                 onLoginSuccess = {
-                    sessionPrefs.setLoggedIn(true)
                     navController.navigate(Routes.App) {
                         popUpTo(Routes.Login) { inclusive = true }
                     }
@@ -167,9 +167,13 @@ private fun SpacerNavHost(
         composable(Routes.App) {
             SpacerAppScaffold(
                 onLogout = {
-                    sessionPrefs.setLoggedIn(false)
-                    navController.navigate(Routes.Login) {
-                        popUpTo(Routes.App) { inclusive = true }
+                    CoroutineScope(Dispatchers.IO).launch {
+                        authRepository.logout()
+                        withContext(Dispatchers.Main) {
+                            navController.navigate(Routes.Login) {
+                                popUpTo(Routes.App) { inclusive = true }
+                            }
+                        }
                     }
                 },
                 isDarkTheme = isDarkTheme,
@@ -181,10 +185,12 @@ private fun SpacerNavHost(
 
 @Composable
 private fun SplashScreen(
-    onFinished: () -> Unit,
+    sessionStatus: SessionStatus,
+    onRouteReady: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var startAnimation by remember { mutableStateOf(false) }
+    var animationFinished by remember { mutableStateOf(false) }
 
     val scale by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0.8f,
@@ -201,7 +207,19 @@ private fun SplashScreen(
     LaunchedEffect(Unit) {
         startAnimation = true
         delay(1600)
-        onFinished()
+        animationFinished = true
+    }
+
+    LaunchedEffect(animationFinished, sessionStatus) {
+        if (!animationFinished) return@LaunchedEffect
+
+        val nextRoute = when (sessionStatus) {
+            is SessionStatus.Authenticated -> Routes.App
+            is SessionStatus.NotAuthenticated -> Routes.Login
+            else -> null
+        }
+
+        if (nextRoute != null) onRouteReady(nextRoute)
     }
 
     Column(
@@ -243,9 +261,17 @@ private fun LoginScreen(
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var oauthLoading by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val authRepository = remember { AuthRepository() }
-    val sessionPrefs = remember { SessionPrefs(context) }
+    val scope = rememberCoroutineScope()
+    val sessionStatus by SupabaseManager.client.auth.sessionStatus.collectAsState()
+
+    LaunchedEffect(sessionStatus) {
+        if (sessionStatus is SessionStatus.Authenticated) {
+            onLoginSuccess()
+        }
+    }
 
     Box(
         modifier = modifier
@@ -281,6 +307,7 @@ private fun LoginScreen(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(24.dp)
                 )
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 28.dp)
         ) {
             Text(
@@ -334,15 +361,11 @@ private fun LoginScreen(
                         withContext(Dispatchers.Main) {
                             result
                                 .onSuccess {
-                                    if (sessionPrefs.getProfileName().isBlank()) {
-                                        sessionPrefs.saveProfileName(email.trim().substringBefore("@"))
-                                    }
                                     Toast.makeText(
                                         context,
                                         "Login successful",
                                         Toast.LENGTH_SHORT
                                     ).show()
-                                    onLoginSuccess()
                                 }
                                 .onFailure { error ->
                                     Toast.makeText(
@@ -355,7 +378,8 @@ private fun LoginScreen(
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(16.dp),
+                enabled = !oauthLoading
             ) {
                 Text("Log In")
             }
@@ -375,11 +399,30 @@ private fun LoginScreen(
             // OAuth provider buttons are kept in place for third-party sign-in as this will be
             // handled through supabase.
             OutlinedButton(
-                onClick = { launchOAuthLogin(context, "google") },
+                onClick = {
+                    scope.launch {
+                        oauthLoading = true
+                        try {
+                            val result = withContext(Dispatchers.IO) {
+                                authRepository.signInWithOAuth(Google)
+                            }
+                            result.onFailure { e ->
+                                Toast.makeText(
+                                    context,
+                                    e.message ?: "Google sign-in failed",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        } finally {
+                            oauthLoading = false
+                        }
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                shape = RoundedCornerShape(14.dp)
+                shape = RoundedCornerShape(14.dp),
+                enabled = !oauthLoading
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.google__g__logo),
@@ -393,11 +436,30 @@ private fun LoginScreen(
             Spacer(modifier = Modifier.height(10.dp))
 
             OutlinedButton(
-                onClick = { launchOAuthLogin(context, "discord") },
+                onClick = {
+                    scope.launch {
+                        oauthLoading = true
+                        try {
+                            val result = withContext(Dispatchers.IO) {
+                                authRepository.signInWithOAuth(Discord)
+                            }
+                            result.onFailure { e ->
+                                Toast.makeText(
+                                    context,
+                                    e.message ?: "Discord sign-in failed",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        } finally {
+                            oauthLoading = false
+                        }
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                shape = RoundedCornerShape(14.dp)
+                shape = RoundedCornerShape(14.dp),
+                enabled = !oauthLoading
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.discord_black_icon),
@@ -411,11 +473,30 @@ private fun LoginScreen(
             Spacer(modifier = Modifier.height(10.dp))
 
             OutlinedButton(
-                onClick = { launchOAuthLogin(context, "github") },
+                onClick = {
+                    scope.launch {
+                        oauthLoading = true
+                        try {
+                            val result = withContext(Dispatchers.IO) {
+                                authRepository.signInWithOAuth(Github)
+                            }
+                            result.onFailure { e ->
+                                Toast.makeText(
+                                    context,
+                                    e.message ?: "GitHub sign-in failed",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        } finally {
+                            oauthLoading = false
+                        }
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                shape = RoundedCornerShape(14.dp)
+                shape = RoundedCornerShape(14.dp),
+                enabled = !oauthLoading
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.octicons_mark_github),
@@ -439,15 +520,6 @@ private fun LoginScreen(
     }
 }
 
-private fun launchOAuthLogin(context: android.content.Context, provider: String) {
-    // The Discord client secret must never be stored in the mobile app.
-    // Supabase handles provider secrets server-side; the app only triggers authorization.
-    val redirectTo = Uri.encode("spacer://auth/callback")
-    val url = "${BuildConfig.SUPABASE_URL}/auth/v1/authorize?provider=$provider&redirect_to=$redirectTo"
-    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-    context.startActivity(intent)
-}
-
 @Composable
 private fun CreateAccountScreen(
     onBackToLoginClick: () -> Unit,
@@ -465,7 +537,6 @@ private fun CreateAccountScreen(
     val scrollState = rememberScrollState()
     val context = LocalContext.current
     val authRepository = remember { AuthRepository() }
-    val sessionPrefs = remember { SessionPrefs(context) }
 
     Column(
         modifier = modifier
@@ -578,8 +649,6 @@ private fun CreateAccountScreen(
                     withContext(Dispatchers.Main) {
                         result
                             .onSuccess {
-                                // Cache name entered at signup so Profile can load it immediately.
-                                sessionPrefs.saveProfileName(name.trim())
                                 Toast.makeText(
                                     context,
                                     "Signup success",
@@ -621,12 +690,14 @@ private fun ForgotPasswordScreen(
 ) {
     var email by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val scrollState = rememberScrollState()
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+            .padding(horizontal = 24.dp, vertical = 32.dp)
+            .verticalScroll(scrollState),
+        verticalArrangement = Arrangement.Top
     ) {
         Column {
             Text(
@@ -648,28 +719,27 @@ private fun ForgotPasswordScreen(
             )
         }
 
-        Column {
-            Button(
-                onClick = {
-                    Toast.makeText(
-                        context,
-                        "Forgot password endpoint not added yet",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text("Send reset link")
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            OutlinedButton(
-                onClick = onBackToLoginClick,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text("Back to login")
-            }
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(
+            onClick = {
+                Toast.makeText(
+                    context,
+                    "Forgot password endpoint not added yet",
+                    Toast.LENGTH_SHORT
+                ).show()
+            },
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Text("Send reset link")
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = onBackToLoginClick,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Text("Back to login")
         }
     }
 }
