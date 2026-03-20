@@ -113,6 +113,12 @@ class MainActivity : ComponentActivity() {
         // Required when OAuth callback returns while activity already exists.
         SupabaseManager.client.handleDeeplinks(intent)
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Ensures PKCE / OAuth return is processed if the intent was delivered here.
+        SupabaseManager.client.handleDeeplinks(intent)
+    }
 }
 
 @Composable
@@ -269,6 +275,9 @@ private fun LoginScreen(
 
     LaunchedEffect(sessionStatus) {
         if (sessionStatus is SessionStatus.Authenticated) {
+            withContext(Dispatchers.IO) {
+                authRepository.ensureProfileAfterOAuthSignIn()
+            }
             onLoginSuccess()
         }
     }

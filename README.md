@@ -58,7 +58,7 @@ Download the latest stable apk in github repo.
 
 Optional section for planned features.
 
-- AI event suggestions
+- Smarter event suggestions
 - Real-time notifications
 - Messaging between guests
 - Calendar syncing

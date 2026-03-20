@@ -1,16 +1,23 @@
 package com.example.spacer.Navigation
 
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.calculateEndPadding
-import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -18,13 +25,14 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -43,11 +51,14 @@ import com.example.spacer.profile.AttendedEventsScreen
 import com.example.spacer.profile.FriendsScreen
 import com.example.spacer.profile.HostedEventsScreen
 import com.example.spacer.profile.SettingsScreen
-import com.example.spacer.location.CreateEventScreen
+import com.example.spacer.events.EventsHubScreen
+import com.example.spacer.events.HostEventDetailScreen
+import com.example.spacer.events.InviteEventScreen
+import com.example.spacer.location.CreateEventDetailsScreen
+import com.example.spacer.location.CreateEventPlaceScreen
 import com.example.spacer.location.PlaceDetailScreen
 import com.example.spacer.location.PlaceUi
 import com.example.spacer.location.toPlaceUi
-import com.example.spacer.social.FindPeopleScreen
 import com.example.spacer.ui.theme.SpacerPurplePrimary
 import com.example.spacer.ui.theme.SpacerPurpleSurface
 import androidx.compose.ui.unit.dp
@@ -85,42 +96,106 @@ fun SpacerAppScaffold(
     modifier: Modifier = Modifier
 ) {
     val navController = androidx.navigation.compose.rememberNavController()
+    var navBarVisible by remember { mutableStateOf(false) }
 
-    Scaffold(
-        modifier = modifier,
-        bottomBar = { SpacerBottomBar(navController = navController) }
-    ) { innerPadding ->
-        val layoutDirection = LocalLayoutDirection.current
-        NavHost(
-            navController = navController,
-            startDestination = AppRoutes.Home,
-            // Keep bottom content tight so the bottom nav sits closer to the screen edge as i find
-            // better ways to make this more convenient as kotlin does no have many options on automatic sizeing
-            modifier = Modifier.padding(
-                start = innerPadding.calculateStartPadding(layoutDirection),
-                top = innerPadding.calculateTopPadding(),
-                end = innerPadding.calculateEndPadding(layoutDirection),
-                bottom = 0.dp
-            )
-        ) {
+    Box(modifier = modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            bottomBar = {}
+        ) { innerPadding ->
+            NavHost(
+                navController = navController,
+                startDestination = AppRoutes.Home,
+                modifier = Modifier.padding(innerPadding)
+            ) {
             composable(AppRoutes.Home) { HomeScreen() }
-            composable(AppRoutes.Events) { FindPeopleScreen() }
+            composable(AppRoutes.Events) {
+                val innerNav = rememberNavController()
+                NavHost(
+                    navController = innerNav,
+                    startDestination = "events_hub",
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    composable("events_hub") {
+                        EventsHubScreen(
+                            onOpenInvite = { innerNav.navigate("invite/${it}") },
+                            onOpenHostEvent = { innerNav.navigate("host/${it}") }
+                        )
+                    }
+                    composable(
+                        route = "invite/{eventId}",
+                        arguments = listOf(
+                            navArgument("eventId") { type = NavType.StringType }
+                        )
+                    ) { entry ->
+                        val id = entry.arguments?.getString("eventId").orEmpty()
+                        InviteEventScreen(
+                            eventId = id,
+                            onBack = { innerNav.popBackStack() }
+                        )
+                    }
+                    composable(
+                        route = "host/{eventId}",
+                        arguments = listOf(
+                            navArgument("eventId") { type = NavType.StringType }
+                        )
+                    ) { entry ->
+                        val id = entry.arguments?.getString("eventId").orEmpty()
+                        HostEventDetailScreen(
+                            eventId = id,
+                            onBack = { innerNav.popBackStack() }
+                        )
+                    }
+                }
+            }
             composable(AppRoutes.Create) {
                 val innerNav = rememberNavController()
                 var selectedVenue by remember { mutableStateOf<PlaceUi?>(null) }
+                var draftEventTitle by remember { mutableStateOf("") }
                 NavHost(
                     navController = innerNav,
-                    startDestination = "create_root",
+                    startDestination = "create_place",
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    composable("create_root") {
-                        CreateEventScreen(
+                    composable("create_place") {
+                        CreateEventPlaceScreen(
                             selectedPlace = selectedVenue,
                             onSelectedPlaceChange = { selectedVenue = it },
+                            eventTitle = draftEventTitle,
+                            onEventTitleChange = { draftEventTitle = it },
                             onOpenPlaceDetail = { place ->
                                 innerNav.navigate("place_detail/${Uri.encode(place.id, "UTF-8")}")
+                            },
+                            onContinue = {
+                                if (selectedVenue != null && draftEventTitle.isNotBlank()) {
+                                    innerNav.navigate("create_details") { launchSingleTop = true }
+                                }
+                            },
+                            onUsePlaceForEvent = {
+                                innerNav.navigate("create_details") { launchSingleTop = true }
                             }
                         )
+                    }
+                    composable("create_details") {
+                        val place = selectedVenue
+                        if (place == null) {
+                            LaunchedEffect(Unit) {
+                                innerNav.popBackStack()
+                            }
+                            Box(modifier = Modifier.fillMaxSize())
+                        } else {
+                            CreateEventDetailsScreen(
+                                place = place,
+                                eventTitle = draftEventTitle,
+                                onEventTitleChange = { draftEventTitle = it },
+                                onBack = { innerNav.popBackStack() },
+                                onPublished = {
+                                    draftEventTitle = ""
+                                    selectedVenue = null
+                                    innerNav.popBackStack("create_place", inclusive = false)
+                                }
+                            )
+                        }
                     }
                     composable(
                         route = "place_detail/{placeId}",
@@ -136,6 +211,7 @@ fun SpacerAppScaffold(
                             onUseForEvent = { detail ->
                                 selectedVenue = detail.toPlaceUi()
                                 innerNav.popBackStack()
+                                innerNav.navigate("create_details") { launchSingleTop = true }
                             }
                         )
                     }
@@ -172,12 +248,46 @@ fun SpacerAppScaffold(
             composable(AppRoutes.Friends) {
                 FriendsScreen(onBack = { navController.popBackStack() })
             }
+            }
+        }
+
+        FloatingActionButton(
+            onClick = { navBarVisible = !navBarVisible },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(
+                    end = 18.dp,
+                    bottom = if (navBarVisible) 80.dp else 16.dp
+                ),
+            containerColor = SpacerPurpleSurface.copy(alpha = 0.92f),
+            contentColor = SpacerPurplePrimary
+        ) {
+            Icon(
+                imageVector = if (navBarVisible) Icons.Filled.Close else Icons.Filled.Menu,
+                contentDescription = if (navBarVisible) "Hide navigation" else "Show navigation"
+            )
+        }
+
+        AnimatedVisibility(
+            visible = navBarVisible,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+        ) {
+            SpacerBottomBar(
+                navController = navController,
+                onNavigate = { navBarVisible = false }
+            )
         }
     }
 }
 
 @Composable
-private fun SpacerBottomBar(navController: NavHostController) {
+private fun SpacerBottomBar(
+    navController: NavHostController,
+    onNavigate: () -> Unit
+) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
@@ -212,6 +322,7 @@ private fun SpacerBottomBar(navController: NavHostController) {
                     NavigationBarItem(
                         selected = selected,
                         onClick = {
+                            onNavigate()
                             navController.navigate(item.route) {
                                 popUpTo(navController.graph.findStartDestination().id) {
                                     saveState = true
