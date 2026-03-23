@@ -1,11 +1,16 @@
 package com.example.spacer.network
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
 data class SignupRequest(
     val username: String,
     val email: String,
     val password: String,
-    val first_name: String?,
-    val last_name: String?
+    val name: String? = null,
+    val phoneNumber: String? = null,
+    val dateOfBirth: String? = null,
+    val allowUpdates: Boolean = true
 )
 
 data class LoginRequest(
@@ -13,21 +18,26 @@ data class LoginRequest(
     val password: String
 )
 
-data class UserDto(
-    val id: Int,
+@Serializable
+data class ProfileDto(
+    @SerialName("id")
+    val id: String,
+
+    @SerialName("username")
     val username: String,
+
+    @SerialName("email")
     val email: String,
-    val first_name: String?,
-    val last_name: String?
-)
 
-data class SignupResponse(
-    val message: String,
-    val user: UserDto
-)
+    @SerialName("name")
+    val name: String? = null,
 
-data class LoginResponse(
-    val message: String,
-    val token: String,
-    val user: UserDto
+    @SerialName("phone_number")
+    val phoneNumber: String? = null,
+
+    @SerialName("date_of_birth")
+    val dateOfBirth: String? = null,
+
+    @SerialName("allow_updates")
+    val allowUpdates: Boolean = true
 )

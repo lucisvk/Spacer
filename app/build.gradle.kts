@@ -1,11 +1,12 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    kotlin("plugin.serialization") version "2.0.21"
 }
 
 android {
     namespace = "com.example.spacer"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.spacer"
@@ -15,6 +16,18 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField(
+            "String",
+            "SUPABASE_URL",
+            "\"https://kpnvdfgyoonvwhqorksm.supabase.co\""
+        )
+
+        buildConfigField(
+            "String",
+            "SUPABASE_KEY",
+            "\"sb_publishable_husrFNKx5v1JIEhMleZiaA_L8gA2oRf\""
+        )
     }
 
     buildTypes {
@@ -26,20 +39,27 @@ android {
             )
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
 dependencies {
-    implementation("com.squareup.retrofit2:retrofit:2.11.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation(platform("io.github.jan-tennert.supabase:bom:3.2.6"))
+    implementation("io.github.jan-tennert.supabase:auth-kt")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.ktor:ktor-client-android:3.0.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -50,6 +70,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.core.splashscreen)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
