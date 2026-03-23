@@ -18,9 +18,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
@@ -70,7 +73,6 @@ private object Routes {
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         android.util.Log.d("SpacerConfig", "URL = ${BuildConfig.SUPABASE_URL}")
@@ -434,14 +436,17 @@ private fun CreateAccountScreen(
     var dateOfBirth by remember { mutableStateOf("") }
     var allowUpdates by remember { mutableStateOf(true) }
 
+    val scrollstate = rememberScrollState()
     val context = LocalContext.current
     val authRepository = remember { AuthRepository() }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+            .imePadding()
+            .padding(horizontal = 24.dp, vertical = 32.dp)
+            .verticalScroll(scrollstate),
+        verticalArrangement = Arrangement.Top
     ) {
         Column {
             Text(
