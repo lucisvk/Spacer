@@ -61,7 +61,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-
 private object Routes {
     const val Splash = "splash"
     const val Login = "login"
@@ -74,11 +73,15 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        android.util.Log.d("SpacerConfig", "URL = ${BuildConfig.SUPABASE_URL}")
+        android.util.Log.d("SpacerConfig", "KEY = ${BuildConfig.SUPABASE_KEY}")
+
         setContent {
             var isDarkTheme by remember { mutableStateOf(true) }
 
             SpacerTheme(darkTheme = isDarkTheme) {
                 val navController = rememberNavController()
+
                 Scaffold(
                     modifier = Modifier.fillMaxSize()
                 ) { innerPadding ->
@@ -115,6 +118,7 @@ private fun SpacerNavHost(
                 }
             )
         }
+
         composable(Routes.Login) {
             LoginScreen(
                 onCreateAccountClick = { navController.navigate(Routes.CreateAccount) },
@@ -123,11 +127,13 @@ private fun SpacerNavHost(
                 onToggleTheme = onToggleTheme
             )
         }
+
         composable(Routes.CreateAccount) {
             CreateAccountScreen(
                 onBackToLoginClick = { navController.popBackStack() }
             )
         }
+
         composable(Routes.ForgotPassword) {
             ForgotPasswordScreen(
                 onBackToLoginClick = { navController.popBackStack() }
@@ -142,11 +148,13 @@ private fun SplashScreen(
     modifier: Modifier = Modifier
 ) {
     var startAnimation by remember { mutableStateOf(false) }
+
     val scale by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0.8f,
         animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
         label = "splashScale"
     )
+
     val alpha by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0f,
         animationSpec = tween(durationMillis = 800),
@@ -174,7 +182,9 @@ private fun SplashScreen(
                 .scale(scale)
                 .alpha(alpha)
         )
+
         Spacer(modifier = Modifier.height(16.dp))
+
         Text(
             text = "Spacer",
             style = MaterialTheme.typography.titleLarge.copy(
@@ -197,7 +207,6 @@ private fun LoginScreen(
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-
     val context = LocalContext.current
     val authRepository = remember { AuthRepository() }
 
@@ -221,6 +230,7 @@ private fun LoginScreen(
                     letterSpacing = 1.5.sp
                 )
             )
+
             Text(
                 text = if (isDarkTheme) "Dark" else "Light",
                 style = MaterialTheme.typography.bodySmall,
@@ -250,6 +260,7 @@ private fun LoginScreen(
                         letterSpacing = 1.5.sp
                     )
                 )
+
                 Text(
                     text = "Log in to continue",
                     style = MaterialTheme.typography.bodyMedium,
@@ -264,7 +275,9 @@ private fun LoginScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+
                 Spacer(modifier = Modifier.height(16.dp))
+
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
@@ -288,41 +301,33 @@ private fun LoginScreen(
 
             Column {
                 Spacer(modifier = Modifier.height(12.dp))
+
                 Button(
                     onClick = {
                         CoroutineScope(Dispatchers.IO).launch {
-                            try {
-                                val response = authRepository.login(
-                                    LoginRequest(
-                                        email = email.trim(),
-                                        password = password
-                                    )
+                            val result = authRepository.login(
+                                LoginRequest(
+                                    email = email.trim(),
+                                    password = password
                                 )
+                            )
 
-                                withContext(Dispatchers.Main) {
-                                    if (response.isSuccessful && response.body() != null) {
-                                        val body = response.body()!!
+                            withContext(Dispatchers.Main) {
+                                result
+                                    .onSuccess {
                                         Toast.makeText(
                                             context,
-                                            "Welcome ${body.user.username}",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    } else {
-                                        Toast.makeText(
-                                            context,
-                                            "Login failed: ${response.code()}",
+                                            "Login successful",
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     }
-                                }
-                            } catch (e: Exception) {
-                                withContext(Dispatchers.Main) {
-                                    Toast.makeText(
-                                        context,
-                                        "Error: ${e.message}",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
+                                    .onFailure { error ->
+                                        Toast.makeText(
+                                            context,
+                                            "Login failed: ${error.message}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
                             }
                         }
                     },
@@ -335,6 +340,7 @@ private fun LoginScreen(
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
+
                 Text(
                     text = "or continue with",
                     style = MaterialTheme.typography.bodySmall,
@@ -360,7 +366,9 @@ private fun LoginScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Text("Continue with Google")
                 }
+
                 Spacer(modifier = Modifier.height(10.dp))
+
                 OutlinedButton(
                     onClick = { },
                     modifier = Modifier
@@ -376,7 +384,9 @@ private fun LoginScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Text("Continue with Discord")
                 }
+
                 Spacer(modifier = Modifier.height(10.dp))
+
                 OutlinedButton(
                     onClick = { },
                     modifier = Modifier
@@ -409,6 +419,7 @@ private fun LoginScreen(
     }
 }
 
+
 @Composable
 private fun CreateAccountScreen(
     onBackToLoginClick: () -> Unit,
@@ -437,6 +448,7 @@ private fun CreateAccountScreen(
                 text = "Create your space",
                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
             )
+
             Text(
                 text = "We’ll keep track of your events and invites.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -451,7 +463,9 @@ private fun CreateAccountScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+
             Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = username,
                 onValueChange = { username = it },
@@ -459,7 +473,9 @@ private fun CreateAccountScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+
             Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it },
@@ -467,7 +483,9 @@ private fun CreateAccountScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+
             Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
@@ -476,7 +494,9 @@ private fun CreateAccountScreen(
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth()
             )
+
             Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = confirmPassword,
                 onValueChange = { confirmPassword = it },
@@ -485,7 +505,9 @@ private fun CreateAccountScreen(
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth()
             )
+
             Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = phoneNumber,
                 onValueChange = { phoneNumber = it },
@@ -493,7 +515,9 @@ private fun CreateAccountScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+
             Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = dateOfBirth,
                 onValueChange = { dateOfBirth = it },
@@ -503,6 +527,7 @@ private fun CreateAccountScreen(
             )
 
             Spacer(modifier = Modifier.height(8.dp))
+
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -510,6 +535,7 @@ private fun CreateAccountScreen(
                     checked = allowUpdates,
                     onCheckedChange = { allowUpdates = it }
                 )
+
                 Text(
                     text = "I’m okay with Spacer emailing or texting me updates.",
                     style = MaterialTheme.typography.bodySmall,
@@ -532,41 +558,39 @@ private fun CreateAccountScreen(
                     val lastName = nameParts.getOrNull(1)
 
                     CoroutineScope(Dispatchers.IO).launch {
-                        try {
-                            val response = authRepository.signup(
-                                SignupRequest(
-                                    username = username.trim(),
-                                    email = email.trim(),
-                                    password = password,
-                                    first_name = firstName,
-                                    last_name = lastName
-                                )
+                        val result = authRepository.signup(
+                            SignupRequest(
+                                username = username.trim(),
+                                email = email.trim(),
+                                password = password,
+                                name = name.trim().ifBlank { null },
+                                phoneNumber = phoneNumber.trim().ifBlank { null },
+                                dateOfBirth = dateOfBirth.trim().ifBlank { null },
+                                allowUpdates = allowUpdates
                             )
+                        )
 
-                            withContext(Dispatchers.Main) {
-                                if (response.isSuccessful && response.body() != null) {
+
+                        withContext(Dispatchers.Main) {
+                            result
+                                .onSuccess {
                                     Toast.makeText(
                                         context,
-                                        "Account created successfully",
+                                        "Signup success",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                     onBackToLoginClick()
-                                } else {
+                                }
+                                .onFailure { error ->
+                                    error.printStackTrace()
+                                    android.util.Log.e("SpacerAuth", "Signup error", error)
+
                                     Toast.makeText(
                                         context,
-                                        "Signup failed: ${response.code()}",
-                                        Toast.LENGTH_SHORT
+                                        "ERROR: ${error.message}",
+                                        Toast.LENGTH_LONG
                                     ).show()
                                 }
-                            }
-                        } catch (e: Exception) {
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(
-                                    context,
-                                    "Error: ${e.message}",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            }
                         }
                     }
                 },
@@ -577,7 +601,9 @@ private fun CreateAccountScreen(
             ) {
                 Text("Sign up")
             }
+
             Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedButton(
                 onClick = onBackToLoginClick,
                 modifier = Modifier
@@ -610,6 +636,7 @@ private fun ForgotPasswordScreen(
                 text = "Reset password",
                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
             )
+
             Text(
                 text = "We’ll email you a link so you can set a new password.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -642,7 +669,9 @@ private fun ForgotPasswordScreen(
             ) {
                 Text("Send reset link")
             }
+
             Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedButton(
                 onClick = onBackToLoginClick,
                 modifier = Modifier
