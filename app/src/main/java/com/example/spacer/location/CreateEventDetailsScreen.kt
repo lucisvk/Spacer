@@ -1,0 +1,394 @@
+package com.example.spacer.location
+
+import android.widget.Toast
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.example.spacer.events.EventRepository
+import com.example.spacer.profile.FriendListItem
+import com.example.spacer.profile.ProfileRepository
+import com.example.spacer.profile.SearchUserRow
+import com.example.spacer.ui.theme.SpacerPurpleBackground
+import com.example.spacer.ui.theme.SpacerPurpleOutline
+import com.example.spacer.ui.theme.SpacerPurplePrimary
+import com.example.spacer.ui.theme.SpacerPurpleSurface
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+
+@OptIn(FlowPreview::class)
+@Composable
+fun CreateEventDetailsScreen(
+    place: PlaceUi,
+    eventTitle: String,
+    onEventTitleChange: (String) -> Unit,
+    onBack: () -> Unit,
+    onPublished: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val profileRepository = remember { ProfileRepository() }
+    val eventRepository = remember { EventRepository() }
+
+    var eventDescription by remember { mutableStateOf("") }
+    var eventDate by remember { mutableStateOf("") }
+    var startTimeStr by remember { mutableStateOf("18:00") }
+    var endTimeStr by remember { mutableStateOf("") }
+    var invitedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var friends by remember { mutableStateOf<List<FriendListItem>>(emptyList()) }
+    var inviteSearchQuery by remember { mutableStateOf("") }
+    var inviteSearchResults by remember { mutableStateOf<List<SearchUserRow>>(emptyList()) }
+    var loadingInviteSearch by remember { mutableStateOf(false) }
+    var publishing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val fr = withContext(Dispatchers.IO) { profileRepository.getFriends() }
+        fr.onSuccess { friends = it }
+    }
+
+    LaunchedEffect(Unit) {
+        snapshotFlow { inviteSearchQuery }
+            .debounce(350L)
+            .distinctUntilChanged()
+            .collectLatest { q ->
+                val t = q.trim()
+                if (t.isEmpty()) {
+                    inviteSearchResults = emptyList()
+                    return@collectLatest
+                }
+                loadingInviteSearch = true
+                try {
+                    val r = withContext(Dispatchers.IO) { profileRepository.searchUsers(t) }
+                    r.onSuccess { inviteSearchResults = it }
+                        .onFailure {
+                            inviteSearchResults = emptyList()
+                            Toast.makeText(context, it.message ?: "Search failed", Toast.LENGTH_SHORT).show()
+                        }
+                } finally {
+                    loadingInviteSearch = false
+                }
+            }
+    }
+
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = SpacerPurpleBackground
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp, vertical = 12.dp)
+        ) {
+            item {
+                Text(
+                    text = "Event details",
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    color = Color(0xFFF4EEFF)
+                )
+                Text(
+                    text = "Step 2 of 2 — Description, schedule, and invites.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFB9B1FF),
+                    modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+                )
+                OutlinedButton(onClick = onBack, modifier = Modifier.padding(bottom = 12.dp)) {
+                    Text("Back to venue")
+                }
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = SpacerPurpleSurface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("Venue", style = MaterialTheme.typography.labelMedium, color = SpacerPurplePrimary)
+                        Text(place.name, color = Color(0xFFF4EEFF), style = MaterialTheme.typography.titleSmall)
+                        if (place.address.isNotBlank()) {
+                            Text(place.address, style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9B1FF))
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text("Title", style = MaterialTheme.typography.labelMedium, color = SpacerPurplePrimary)
+                        OutlinedTextField(
+                            value = eventTitle,
+                            onValueChange = onEventTitleChange,
+                            label = { Text("Event title") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            colors = detailsFieldColors()
+                        )
+                    }
+                }
+            }
+
+            item {
+                OutlinedTextField(
+                    value = eventDescription,
+                    onValueChange = { eventDescription = it },
+                    label = { Text("Description") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    colors = detailsFieldColors()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Date & time",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFB9B1FF)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = eventDate,
+                    onValueChange = { eventDate = it },
+                    label = { Text("Date (YYYY-MM-DD)") },
+                    placeholder = { Text("2026-04-20") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = detailsFieldColors()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(
+                        value = startTimeStr,
+                        onValueChange = { startTimeStr = it },
+                        label = { Text("Start") },
+                        placeholder = { Text("18:00") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        colors = detailsFieldColors()
+                    )
+                    OutlinedTextField(
+                        value = endTimeStr,
+                        onValueChange = { endTimeStr = it },
+                        label = { Text("End (optional)") },
+                        placeholder = { Text("21:00") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        colors = detailsFieldColors()
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            item {
+                Text(
+                    "Invite people",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = Color(0xFFF4EEFF)
+                )
+                Text(
+                    "Toggle friends or search by name to add invitees.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB9B1FF),
+                    modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
+                )
+                if (friends.isEmpty()) {
+                    Text(
+                        "No friends yet — use Find people under Events to connect.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF8A82C8)
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        friends.forEach { f ->
+                            val on = f.id in invitedIds
+                            AssistChip(
+                                onClick = {
+                                    invitedIds = if (on) invitedIds - f.id else invitedIds + f.id
+                                },
+                                label = { Text(f.fullName) },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = if (on) SpacerPurplePrimary.copy(alpha = 0.4f)
+                                    else SpacerPurpleSurface,
+                                    labelColor = Color(0xFFF4EEFF)
+                                )
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = inviteSearchQuery,
+                    onValueChange = { inviteSearchQuery = it },
+                    label = { Text("Search users to invite") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = detailsFieldColors()
+                )
+                if (loadingInviteSearch) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = SpacerPurplePrimary
+                    )
+                }
+                inviteSearchResults.forEach { u ->
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                u.fullName?.ifBlank { u.username ?: "User" } ?: (u.username ?: "User"),
+                                color = Color(0xFFF4EEFF),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "@${u.username ?: "user"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFB9B1FF)
+                            )
+                        }
+                        val added = u.id in invitedIds
+                        OutlinedButton(
+                            onClick = {
+                                invitedIds = if (added) invitedIds - u.id else invitedIds + u.id
+                            }
+                        ) {
+                            Text(if (added) "Remove" else "Invite")
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            }
+
+            item {
+                val canPublish = eventDate.isNotBlank() && eventTitle.isNotBlank()
+                Button(
+                    onClick = {
+                        val title = eventTitle.trim()
+                        if (title.isEmpty()) {
+                            Toast.makeText(context, "Add an event title", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        val startIso = runCatching {
+                            buildOffsetIso(eventDate.trim(), startTimeStr.trim())
+                        }.getOrElse {
+                            Toast.makeText(
+                                context,
+                                "Use date YYYY-MM-DD and time like 18:00",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@Button
+                        }
+                        val endIso = endTimeStr.trim().takeIf { it.isNotEmpty() }?.let { et ->
+                            runCatching { buildOffsetIso(eventDate.trim(), et) }.getOrNull()
+                        }
+                        val loc = buildString {
+                            append(place.name)
+                            if (place.address.isNotBlank()) {
+                                append(" · ")
+                                append(place.address)
+                            }
+                        }
+                        publishing = true
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                eventRepository.createEventWithInvites(
+                                    title = title,
+                                    description = eventDescription.trim().ifBlank { null },
+                                    startsAtIso = startIso,
+                                    endsAtIso = endIso,
+                                    locationLabel = loc,
+                                    inviteeIds = invitedIds.toList()
+                                )
+                            }
+                            publishing = false
+                            result.onSuccess {
+                                Toast.makeText(
+                                    context,
+                                    "Event created — invites sent",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                onPublished()
+                            }.onFailure {
+                                Toast.makeText(
+                                    context,
+                                    it.message ?: "Could not create event",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    },
+                    enabled = canPublish && !publishing,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (publishing) "Publishing…" else "Publish event & send invites")
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+private fun buildOffsetIso(dateStr: String, timeStr: String): String {
+    val d = LocalDate.parse(dateStr)
+    val t = LocalTime.parse(timeStr)
+    return d.atTime(t).atZone(ZoneId.systemDefault()).toOffsetDateTime().toString()
+}
+
+@Composable
+private fun detailsFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color(0xFFF4EEFF),
+    unfocusedTextColor = Color(0xFFF4EEFF),
+    focusedBorderColor = SpacerPurplePrimary,
+    unfocusedBorderColor = SpacerPurpleOutline,
+    cursorColor = SpacerPurplePrimary,
+    focusedLabelColor = Color(0xFFB9B1FF),
+    unfocusedLabelColor = Color(0xFF8A82C8),
+    focusedPlaceholderColor = Color(0xFF6F6699),
+    unfocusedPlaceholderColor = Color(0xFF6F6699)
+)
