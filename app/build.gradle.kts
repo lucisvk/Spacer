@@ -1,7 +1,24 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     kotlin("plugin.serialization") version "2.0.21"
+}
+
+val localProperties = Properties().apply {
+    val localFile = rootProject.file("local.properties")
+    if (localFile.exists()) {
+        localFile.inputStream().use { load(it) }
+    }
+}
+
+fun localProp(name: String, fallback: String = ""): String {
+    return localProperties.getProperty(name, fallback)
+}
+
+fun asBuildConfigString(value: String): String {
+    return "\"${value.replace("\"", "\\\"")}\""
 }
 
 android {
@@ -20,13 +37,25 @@ android {
         buildConfigField(
             "String",
             "SUPABASE_URL",
-            "\"https://kpnvdfgyoonvwhqorksm.supabase.co\""
+            asBuildConfigString(localProp("SUPABASE_URL", ""))
         )
 
         buildConfigField(
             "String",
             "SUPABASE_KEY",
-            "\"sb_publishable_husrFNKx5v1JIEhMleZiaA_L8gA2oRf\""
+            asBuildConfigString(localProp("SUPABASE_KEY", ""))
+        )
+
+        buildConfigField(
+            "String",
+            "GOOGLE_WEB_CLIENT_ID",
+            asBuildConfigString(localProp("GOOGLE_WEB_CLIENT_ID", ""))
+        )
+
+        buildConfigField(
+            "String",
+            "DISCORD_CLIENT_ID",
+            asBuildConfigString(localProp("DISCORD_CLIENT_ID", ""))
         )
     }
 
@@ -55,10 +84,12 @@ dependencies {
     implementation(platform("io.github.jan-tennert.supabase:bom:3.2.6"))
     implementation("io.github.jan-tennert.supabase:auth-kt")
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:storage-kt")
     implementation("io.ktor:ktor-client-android:3.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -68,6 +99,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation("androidx.compose.material:material")
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.core.splashscreen)
 
