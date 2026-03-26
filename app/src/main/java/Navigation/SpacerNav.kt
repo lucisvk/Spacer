@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -49,6 +50,8 @@ import com.example.spacer.home.HomeScreen
 import com.example.spacer.profile.EditProfileScreen
 import com.example.spacer.profile.ProfileScreen
 import com.example.spacer.profile.AttendedEventsScreen
+import com.example.spacer.profile.AvailabilityScreen
+import com.example.spacer.profile.BlockedUsersScreen
 import com.example.spacer.network.AuthRepository
 import com.example.spacer.network.SessionPrefs
 import com.example.spacer.profile.FriendsScreen
@@ -58,6 +61,9 @@ import com.example.spacer.profile.ProfileRepository
 import com.example.spacer.profile.SettingsScreen
 import com.example.spacer.profile.displayLabelFromProfile
 import com.example.spacer.events.EventsHubScreen
+import com.example.spacer.events.DmChatScreen
+import com.example.spacer.events.DmThreadsScreen
+import com.example.spacer.events.EventChatScreen
 import com.example.spacer.events.HostEventDetailScreen
 import com.example.spacer.events.InviteEventScreen
 import com.example.spacer.location.CreateEventDetailsScreen
@@ -81,6 +87,11 @@ object AppRoutes {
     const val HostedEvents = "hosted_events"
     const val AttendedEvents = "attended_events"
     const val Friends = "friends"
+    const val BlockedUsers = "blocked_users"
+    const val PublicProfile = "public_profile"
+    const val DmThreads = "dm_threads"
+    const val DmChat = "dm_chat"
+    const val Availability = "availability"
 }
 
 private data class BottomNavItem(
@@ -101,10 +112,13 @@ fun SpacerAppScaffold(
     onLogout: () -> Unit,
     isDarkTheme: Boolean,
     onToggleTheme: () -> Unit,
+    pendingDeepLink: String? = null,
+    onDeepLinkConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val navController = androidx.navigation.compose.rememberNavController()
     var navBarVisible by remember { mutableStateOf(false) }
+    var eventsDeepLinkRoute by remember { mutableStateOf<String?>(null) }
     val appContext = LocalContext.current
     val sessionPrefs = remember { SessionPrefs(appContext) }
     val authRepository = remember { AuthRepository() }
@@ -120,6 +134,38 @@ fun SpacerAppScaffold(
                 }
             }
         }
+    }
+
+    LaunchedEffect(pendingDeepLink) {
+        val link = pendingDeepLink ?: return@LaunchedEffect
+        val target = parseDeepLinkTarget(link)
+        when (target) {
+            is DeepLinkTarget.EventInvite -> {
+                eventsDeepLinkRoute = "invite/${target.eventId}"
+                navController.navigate(AppRoutes.Events) { launchSingleTop = true }
+            }
+            is DeepLinkTarget.EventChat -> {
+                eventsDeepLinkRoute = "event_chat/${target.eventId}"
+                navController.navigate(AppRoutes.Events) { launchSingleTop = true }
+            }
+            is DeepLinkTarget.DmThreads -> {
+                navController.navigate(AppRoutes.DmThreads) { launchSingleTop = true }
+            }
+            is DeepLinkTarget.DmChat -> {
+                navController.navigate("${AppRoutes.DmChat}/${Uri.encode(target.peerId)}") { launchSingleTop = true }
+            }
+            is DeepLinkTarget.PublicProfile -> {
+                navController.navigate("${AppRoutes.PublicProfile}/${Uri.encode(target.userId)}") { launchSingleTop = true }
+            }
+            is DeepLinkTarget.EventsHub -> {
+                navController.navigate(AppRoutes.Events) { launchSingleTop = true }
+            }
+            is DeepLinkTarget.SocialRequests -> {
+                navController.navigate(AppRoutes.Friends) { launchSingleTop = true }
+            }
+            DeepLinkTarget.None -> Unit
+        }
+        onDeepLinkConsumed()
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -147,6 +193,13 @@ fun SpacerAppScaffold(
             }
             composable(AppRoutes.Events) {
                 val innerNav = rememberNavController()
+                val pendingInnerRoute = eventsDeepLinkRoute
+                LaunchedEffect(pendingInnerRoute) {
+                    if (!pendingInnerRoute.isNullOrBlank()) {
+                        innerNav.navigate(pendingInnerRoute) { launchSingleTop = true }
+                        eventsDeepLinkRoute = null
+                    }
+                }
                 NavHost(
                     navController = innerNav,
                     startDestination = "events_hub",
@@ -173,6 +226,7 @@ fun SpacerAppScaffold(
                         InviteEventScreen(
                             eventId = id,
                             onBack = { innerNav.popBackStack() },
+                            onOpenEventChat = { innerNav.navigate("event_chat/$id") },
                             onOpenCalendarSettings = {
                                 navController.navigate(AppRoutes.Settings) {
                                     launchSingleTop = true
@@ -189,6 +243,17 @@ fun SpacerAppScaffold(
                     ) { entry ->
                         val id = entry.arguments?.getString("eventId").orEmpty()
                         HostEventDetailScreen(
+                            eventId = id,
+                            onOpenEventChat = { innerNav.navigate("event_chat/$id") },
+                            onBack = { innerNav.popBackStack() }
+                        )
+                    }
+                    composable(
+                        route = "event_chat/{eventId}",
+                        arguments = listOf(navArgument("eventId") { type = NavType.StringType })
+                    ) { entry ->
+                        val id = entry.arguments?.getString("eventId").orEmpty()
+                        EventChatScreen(
                             eventId = id,
                             onBack = { innerNav.popBackStack() }
                         )
@@ -288,7 +353,9 @@ fun SpacerAppScaffold(
                     onOpenSettings = { navController.navigate(AppRoutes.Settings) },
                     onOpenHostedEvents = { navController.navigate(AppRoutes.HostedEvents) },
                     onOpenAttendedEvents = { navController.navigate(AppRoutes.AttendedEvents) },
-                    onOpenFriends = { navController.navigate(AppRoutes.Friends) }
+                    onOpenFriends = { navController.navigate(AppRoutes.Friends) },
+                    onOpenMessages = { navController.navigate(AppRoutes.DmThreads) },
+                    onOpenAvailability = { navController.navigate(AppRoutes.Availability) }
                 )
             }
             composable(AppRoutes.EditProfile) {
@@ -301,8 +368,12 @@ fun SpacerAppScaffold(
                     isDarkTheme = isDarkTheme,
                     onToggleTheme = onToggleTheme,
                     onLogout = onLogout,
+                    onOpenBlockedUsers = { navController.navigate(AppRoutes.BlockedUsers) },
                     onBack = { navController.popBackStack() }
                 )
+            }
+            composable(AppRoutes.Availability) {
+                AvailabilityScreen(onBack = { navController.popBackStack() })
             }
             composable(AppRoutes.HostedEvents) {
                 HostedEventsScreen(onBack = { navController.popBackStack() })
@@ -311,7 +382,51 @@ fun SpacerAppScaffold(
                 AttendedEventsScreen(onBack = { navController.popBackStack() })
             }
             composable(AppRoutes.Friends) {
-                FriendsScreen(onBack = { navController.popBackStack() })
+                FriendsScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenProfile = { userId ->
+                        navController.navigate("${AppRoutes.PublicProfile}/${Uri.encode(userId)}")
+                    },
+                    onOpenDm = { userId ->
+                        navController.navigate("${AppRoutes.DmChat}/${Uri.encode(userId)}")
+                    }
+                )
+            }
+            composable(AppRoutes.DmThreads) {
+                DmThreadsScreen(
+                    onOpenThread = { _, peerId ->
+                        navController.navigate("${AppRoutes.DmChat}/${Uri.encode(peerId)}")
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(
+                route = "${AppRoutes.DmChat}/{peerId}",
+                arguments = listOf(navArgument("peerId") { type = NavType.StringType })
+            ) { entry ->
+                val peerId = Uri.decode(entry.arguments?.getString("peerId").orEmpty())
+                DmChatScreen(
+                    peerUserId = peerId,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(AppRoutes.BlockedUsers) {
+                BlockedUsersScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenProfile = { userId ->
+                        navController.navigate("${AppRoutes.PublicProfile}/${Uri.encode(userId)}")
+                    }
+                )
+            }
+            composable(
+                route = "${AppRoutes.PublicProfile}/{userId}",
+                arguments = listOf(navArgument("userId") { type = NavType.StringType })
+            ) { entry ->
+                val userId = Uri.decode(entry.arguments?.getString("userId").orEmpty())
+                PublicProfileScreen(
+                    userId = userId,
+                    onBack = { navController.popBackStack() }
+                )
             }
             }
         }
@@ -319,11 +434,11 @@ fun SpacerAppScaffold(
         FloatingActionButton(
             onClick = { navBarVisible = !navBarVisible },
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .navigationBarsPadding()
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
                 .padding(
                     end = 18.dp,
-                    bottom = if (navBarVisible) 80.dp else 16.dp
+                    top = 10.dp
                 ),
             containerColor = SpacerPurpleSurface.copy(alpha = 0.92f),
             contentColor = SpacerPurplePrimary
@@ -419,6 +534,48 @@ private fun SpacerBottomBar(
                 }
             }
         }
+    }
+}
+
+private sealed interface DeepLinkTarget {
+    data class EventInvite(val eventId: String) : DeepLinkTarget
+    data class EventChat(val eventId: String) : DeepLinkTarget
+    data class DmChat(val peerId: String) : DeepLinkTarget
+    data object DmThreads : DeepLinkTarget
+    data object EventsHub : DeepLinkTarget
+    data object SocialRequests : DeepLinkTarget
+    data class PublicProfile(val userId: String) : DeepLinkTarget
+    data object None : DeepLinkTarget
+}
+
+private fun parseDeepLinkTarget(raw: String): DeepLinkTarget {
+    val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return DeepLinkTarget.None
+    val host = uri.host?.lowercase() ?: return DeepLinkTarget.None
+    val firstPath = uri.pathSegments.firstOrNull().orEmpty()
+    val secondPath = uri.pathSegments.getOrNull(1).orEmpty()
+    return when (host) {
+        "event", "invite" -> {
+            val id = firstPath.ifBlank { uri.getQueryParameter("id").orEmpty() }
+            if (id.isBlank()) DeepLinkTarget.None else DeepLinkTarget.EventInvite(id)
+        }
+        "event-chat" -> {
+            val id = firstPath.ifBlank { uri.getQueryParameter("id").orEmpty() }
+            if (id.isBlank()) DeepLinkTarget.None else DeepLinkTarget.EventChat(id)
+        }
+        "dm" -> {
+            when {
+                firstPath == "threads" -> DeepLinkTarget.DmThreads
+                firstPath.isNotBlank() -> DeepLinkTarget.DmChat(firstPath)
+                else -> DeepLinkTarget.None
+            }
+        }
+        "events" -> DeepLinkTarget.EventsHub
+        "social" -> if (firstPath == "requests") DeepLinkTarget.SocialRequests else DeepLinkTarget.None
+        "profile", "user" -> {
+            val userId = firstPath.ifBlank { secondPath }.ifBlank { uri.getQueryParameter("id").orEmpty() }
+            if (userId.isBlank()) DeepLinkTarget.None else DeepLinkTarget.PublicProfile(userId)
+        }
+        else -> DeepLinkTarget.None
     }
 }
 

@@ -6,6 +6,7 @@ import io.github.jan.supabase.auth.ExternalAuthAction
 import io.github.jan.supabase.auth.FlowType
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.storage.Storage
 
 object SupabaseManager {
@@ -25,6 +26,7 @@ object SupabaseManager {
             defaultExternalAuthAction = ExternalAuthAction.CustomTabs()
         }
         install(Postgrest)
+        install(Realtime)
         install(Storage)
     }
 }
