@@ -8,6 +8,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
+/** Must match [io.github.jan.supabase.auth.Auth] scheme/host and Supabase Dashboard → Auth → URL Configuration → Redirect URLs. */
+private const val OAUTH_REDIRECT_URL = "spacer://auth"
+
 class AuthRepository {
 
     private val supabase = SupabaseManager.client
@@ -83,12 +86,44 @@ class AuthRepository {
 
     /**
      * Starts the OAuth flow (Custom Tab → provider → deeplink).
-     * Configure Google / GitHub / Discord in the Supabase dashboard and add redirect URL `spacer://auth`.
+     * Enable each provider in Supabase (Authentication → Providers): Google, Discord, GitHub, etc.
+     * Add redirect URL [OAUTH_REDIRECT_URL] under Authentication → URL Configuration → Redirect URLs
+     * (same value for every provider the app uses).
      */
     suspend fun signInWithOAuth(provider: OAuthProvider): Result<Unit> {
         configErrorOrNull()?.let { return Result.failure(it) }
         return try {
-            supabase.auth.signInWith(provider)
+            supabase.auth.signInWith(provider, redirectUrl = OAUTH_REDIRECT_URL)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Email/password signup writes [profiles] explicitly; OAuth users need the same row for RLS queries.
+     */
+    suspend fun ensureProfileAfterOAuthSignIn(): Result<Unit> {
+        configErrorOrNull()?.let { return Result.failure(it) }
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.success(Unit)
+            val email = user.email?.trim().orEmpty()
+            val metaName = user.userMetadata?.get("full_name")?.toString()?.trim('"')?.trim().orEmpty()
+                .ifEmpty {
+                    user.userMetadata?.get("name")?.toString()?.trim('"')?.trim().orEmpty()
+                }
+            val usernameBase = if (email.isNotEmpty()) email.substringBefore("@").lowercase()
+            else user.id.take(8)
+            val display = metaName.ifEmpty { usernameBase }
+            val row = buildMap<String, Any?> {
+                put("id", user.id)
+                put("username", usernameBase)
+                put("name", display)
+                put("about_me", "")
+                if (email.isNotEmpty()) put("email", email)
+            }
+            supabase.from("profiles").upsert(row)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
