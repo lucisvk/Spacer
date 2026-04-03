@@ -1,9 +1,11 @@
 package com.example.spacer
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -57,6 +59,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.spacer.Navigation.SpacerAppScaffold
+import com.example.spacer.events.TodayEventNotifier
 import com.example.spacer.network.AuthRepository
 import com.example.spacer.network.LoginRequest
 import com.example.spacer.network.SignupRequest
@@ -83,11 +86,18 @@ private object Routes {
 }
 
 class MainActivity : ComponentActivity() {
+    private val notificationsPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // Required for OAuth + OTP links on Android when using deeplinks.
         SupabaseManager.client.handleDeeplinks(intent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
 
         setContent {
             var isDarkTheme by remember { mutableStateOf(true) }
@@ -171,6 +181,12 @@ private fun SpacerNavHost(
         }
 
         composable(Routes.App) {
+            val context = LocalContext.current
+            LaunchedEffect(Unit) {
+                withContext(Dispatchers.IO) {
+                    TodayEventNotifier(context).notifyHostedEventsForToday()
+                }
+            }
             SpacerAppScaffold(
                 onLogout = {
                     CoroutineScope(Dispatchers.IO).launch {
