@@ -4,13 +4,16 @@ import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -26,11 +29,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import com.example.spacer.location.PlacesRepository
 import com.example.spacer.profile.EventRow
-import com.example.spacer.profile.ProfileRepository
 import com.example.spacer.social.FindPeopleScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -47,9 +53,11 @@ fun EventsHubScreen(
     var tabIndex by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
     val eventRepo = remember { EventRepository() }
+    val placesRepo = remember { PlacesRepository() }
 
     var pending by remember { mutableStateOf<List<PendingInviteUi>>(emptyList()) }
     var hosting by remember { mutableStateOf<List<EventRow>>(emptyList()) }
+    var eventPhotoUrls by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
@@ -66,6 +74,20 @@ fun EventsHubScreen(
             .onFailure {
                 Toast.makeText(context, it.message ?: "Could not load hosting", Toast.LENGTH_LONG).show()
             }
+        val eventLocations = (hosting.map { it.id to (it.location ?: "") } +
+            pending.map { it.eventId to (it.location ?: "") })
+            .distinctBy { it.first }
+            .filter { it.second.isNotBlank() }
+        eventPhotoUrls = withContext(Dispatchers.IO) {
+            eventLocations.mapNotNull { (eventId, location) ->
+                val photoName = placesRepo.searchText(location)
+                    .getOrDefault(emptyList())
+                    .firstOrNull()
+                    ?.primaryPhotoName
+                val url = photoName?.let { placesRepo.photoMediaUrl(it, 350) }
+                if (url != null) eventId to url else null
+            }.toMap()
+        }
         loading = false
     }
 
@@ -84,6 +106,7 @@ fun EventsHubScreen(
                 loading = loading,
                 pending = pending,
                 hosting = hosting,
+                eventPhotoUrls = eventPhotoUrls,
                 onOpenInvite = onOpenInvite,
                 onOpenHostEvent = onOpenHostEvent
             )
@@ -97,6 +120,7 @@ private fun InvitesHostingTab(
     loading: Boolean,
     pending: List<PendingInviteUi>,
     hosting: List<EventRow>,
+    eventPhotoUrls: Map<String, String>,
     onOpenInvite: (String) -> Unit,
     onOpenHostEvent: (String) -> Unit
 ) {
@@ -136,11 +160,23 @@ private fun InvitesHostingTab(
                         .clickable { onOpenHostEvent(ev.id) },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text(ev.title, fontWeight = FontWeight.SemiBold)
-                        Text(ev.startsAt, style = MaterialTheme.typography.bodySmall)
-                        ev.location?.takeIf { it.isNotBlank() }?.let {
-                            Text(it, style = MaterialTheme.typography.bodySmall)
+                    Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        eventPhotoUrls[ev.id]?.let { imageUrl ->
+                            AsyncImage(
+                                model = imageUrl,
+                                contentDescription = "Event place image",
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        Column {
+                            Text(ev.title, fontWeight = FontWeight.SemiBold)
+                            Text(ev.startsAt, style = MaterialTheme.typography.bodySmall)
+                            ev.location?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
@@ -172,12 +208,24 @@ private fun InvitesHostingTab(
                         .clickable { onOpenInvite(inv.eventId) },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text(inv.title, fontWeight = FontWeight.SemiBold)
-                        Text("From ${inv.hostDisplayName}", style = MaterialTheme.typography.bodySmall)
-                        Text(inv.startsAt, style = MaterialTheme.typography.bodySmall)
-                        inv.location?.takeIf { it.isNotBlank() }?.let {
-                            Text(it, style = MaterialTheme.typography.bodySmall)
+                    Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        eventPhotoUrls[inv.eventId]?.let { imageUrl ->
+                            AsyncImage(
+                                model = imageUrl,
+                                contentDescription = "Event place image",
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        Column {
+                            Text(inv.title, fontWeight = FontWeight.SemiBold)
+                            Text("From ${inv.hostDisplayName}", style = MaterialTheme.typography.bodySmall)
+                            Text(inv.startsAt, style = MaterialTheme.typography.bodySmall)
+                            inv.location?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }

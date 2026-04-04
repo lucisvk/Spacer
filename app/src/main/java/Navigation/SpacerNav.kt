@@ -193,6 +193,10 @@ fun SpacerAppScaffold(
                                     draftEventTitle = ""
                                     selectedVenue = null
                                     innerNav.popBackStack("create_place", inclusive = false)
+                                    navController.navigate(AppRoutes.Events) {
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
                                 }
                             )
                         }
