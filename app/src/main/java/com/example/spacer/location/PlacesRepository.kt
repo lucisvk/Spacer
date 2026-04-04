@@ -113,8 +113,8 @@ class PlacesRepository(
 
     suspend fun searchText(
         query: String,
-        latitude: Double,
-        longitude: Double,
+        latitude: Double? = null,
+        longitude: Double? = null,
         radiusMeters: Double = 25_000.0
     ): Result<List<PlaceUi>> {
         if (apiKey.isBlank()) {
@@ -125,12 +125,14 @@ class PlacesRepository(
         return try {
             val body = SearchTextRequest(
                 textQuery = q,
-                locationBias = LocationBiasCircle(
-                    circle = CircleBody(
-                        center = LatLngBody(latitude, longitude),
-                        radius = radiusMeters.coerceIn(500.0, 50_000.0)
+                locationBias = if (latitude != null && longitude != null) {
+                    LocationBiasCircle(
+                        circle = CircleBody(
+                            center = LatLngBody(latitude, longitude),
+                            radius = radiusMeters.coerceIn(500.0, 50_000.0)
+                        )
                     )
-                ),
+                } else null,
                 maxResultCount = 20
             )
             val response = client.post(SEARCH_TEXT_URL) {
