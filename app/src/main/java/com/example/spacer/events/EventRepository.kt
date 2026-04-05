@@ -40,6 +40,17 @@ private data class EventInviteRow(
 )
 
 @Serializable
+private data class PublicEventInviteRow(
+    val id: String? = null,
+    @SerialName("event_id") val eventId: String
+)
+
+@Serializable
+private data class PublicListingInsert(
+    @SerialName("event_id") val eventId: String
+)
+
+@Serializable
 private data class EventAvailabilityUpsert(
     @SerialName("event_id") val eventId: String,
     @SerialName("user_id") val userId: String,
@@ -68,6 +79,12 @@ data class AvailabilityEntryUi(
     val displayName: String,
     val presetSlots: String,
     val notes: String?
+)
+
+/** Event the current user hosts or has accepted an invite to; shown on the Events hub. */
+data class MyEventHubItem(
+    val event: EventRow,
+    val isHosting: Boolean
 )
 
 class EventRepository {
@@ -113,9 +130,17 @@ class EventRepository {
                     )
                 )
             }
+            registerPublicEventListing(eventId)
             Result.success(eventId)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /** New events are discoverable in “Public events” once [public.public_event_invites] exists (see database SQL). */
+    private suspend fun registerPublicEventListing(eventId: String) {
+        runCatching {
+            supabase.from("public_event_invites").insert(PublicListingInsert(eventId = eventId))
         }
     }
 
@@ -312,6 +337,76 @@ class EventRepository {
             Result.success(events)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /** All events you host plus events you accepted (excluding host duplicates), soonest first. */
+    suspend fun listMyHostingAndAttendingEvents(): Result<List<MyEventHubItem>> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+
+            val hosted = supabase.from("app_events")
+                .select {
+                    filter { eq("host_id", user.id) }
+                    order(column = "starts_at", order = Order.ASCENDING)
+                }
+                .decodeList<EventRow>()
+
+            val acceptedInvites = supabase.from("event_invites")
+                .select {
+                    filter {
+                        eq("invitee_id", user.id)
+                        eq("status", "accepted")
+                    }
+                }
+                .decodeList<EventInviteRow>()
+
+            val hostedIds = hosted.map { it.id }.toSet()
+            val attendingOnly = acceptedInvites.mapNotNull { inv ->
+                runCatching {
+                    supabase.from("app_events")
+                        .select {
+                            filter { eq("id", inv.eventId) }
+                            limit(1)
+                        }
+                        .decodeSingle<EventRow>()
+                }.getOrNull()
+            }.filter { it.id !in hostedIds }
+
+            val items = hosted.map { MyEventHubItem(event = it, isHosting = true) } +
+                attendingOnly.map { MyEventHubItem(event = it, isHosting = false) }
+            val sorted = items.sortedBy { parseDate(it.event.startsAt) ?: OffsetDateTime.MAX }
+            Result.success(sorted)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Events listed in [public_event_invites], excluding ones you host (you already see those). */
+    suspend fun listPublicDiscoverableEvents(): Result<List<EventRow>> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            val rows = supabase.from("public_event_invites")
+                .select { }
+                .decodeList<PublicEventInviteRow>()
+            val events = rows.mapNotNull { row ->
+                runCatching {
+                    supabase.from("app_events")
+                        .select {
+                            filter { eq("id", row.eventId) }
+                            limit(1)
+                        }
+                        .decodeSingle<EventRow>()
+                }.getOrNull()
+            }
+                .filter { it.hostId != user.id }
+                .distinctBy { it.id }
+                .sortedBy { parseDate(it.startsAt) ?: OffsetDateTime.MAX }
+            Result.success(events)
+        } catch (_: Exception) {
+            Result.success(emptyList())
         }
     }
 }

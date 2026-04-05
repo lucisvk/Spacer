@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -48,9 +49,13 @@ import com.example.spacer.home.HomeScreen
 import com.example.spacer.profile.EditProfileScreen
 import com.example.spacer.profile.ProfileScreen
 import com.example.spacer.profile.AttendedEventsScreen
+import com.example.spacer.network.AuthRepository
+import com.example.spacer.network.SessionPrefs
 import com.example.spacer.profile.FriendsScreen
 import com.example.spacer.profile.HostedEventsScreen
+import com.example.spacer.profile.ProfileRepository
 import com.example.spacer.profile.SettingsScreen
+import com.example.spacer.profile.displayLabelFromProfile
 import com.example.spacer.events.EventsHubScreen
 import com.example.spacer.events.HostEventDetailScreen
 import com.example.spacer.events.InviteEventScreen
@@ -62,6 +67,8 @@ import com.example.spacer.location.toPlaceUi
 import com.example.spacer.ui.theme.SpacerPurplePrimary
 import com.example.spacer.ui.theme.SpacerPurpleSurface
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 object AppRoutes {
     const val Home = "home"
@@ -97,6 +104,22 @@ fun SpacerAppScaffold(
 ) {
     val navController = androidx.navigation.compose.rememberNavController()
     var navBarVisible by remember { mutableStateOf(false) }
+    val appContext = LocalContext.current
+    val sessionPrefs = remember { SessionPrefs(appContext) }
+    val authRepository = remember { AuthRepository() }
+    val profileRepository = remember { ProfileRepository() }
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            authRepository.ensureProfileAfterOAuthSignIn()
+            profileRepository.load().onSuccess { snap ->
+                val label = displayLabelFromProfile(snap.profile)
+                if (label.isNotBlank()) {
+                    sessionPrefs.saveProfileName(label)
+                }
+            }
+        }
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         Scaffold(
@@ -118,6 +141,8 @@ fun SpacerAppScaffold(
                 ) {
                     composable("events_hub") {
                         EventsHubScreen(
+                            innerEventsNav = innerNav,
+                            outerNav = navController,
                             onOpenInvite = { innerNav.navigate("invite/${it}") },
                             onOpenHostEvent = { innerNav.navigate("host/${it}") }
                         )
@@ -194,6 +219,9 @@ fun SpacerAppScaffold(
                                     selectedVenue = null
                                     innerNav.popBackStack("create_place", inclusive = false)
                                     navController.navigate(AppRoutes.Events) {
+                                        popUpTo(navController.graph.findStartDestination().id) {
+                                            saveState = true
+                                        }
                                         launchSingleTop = true
                                         restoreState = true
                                     }
@@ -223,6 +251,7 @@ fun SpacerAppScaffold(
             }
             composable(AppRoutes.Profile) {
                 ProfileScreen(
+                    navController = navController,
                     onOpenEditProfile = { navController.navigate(AppRoutes.EditProfile) },
                     onOpenSettings = { navController.navigate(AppRoutes.Settings) },
                     onOpenHostedEvents = { navController.navigate(AppRoutes.HostedEvents) },
@@ -332,7 +361,7 @@ private fun SpacerBottomBar(
                                     saveState = true
                                 }
                                 launchSingleTop = true
-                                restoreState = true
+                                restoreState = item.route != AppRoutes.Create
                             }
                         },
                         icon = {
