@@ -19,26 +19,35 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import coil.compose.AsyncImage
+import com.example.spacer.Navigation.AppRoutes
 import com.example.spacer.location.PlacesRepository
 import com.example.spacer.profile.EventRow
 import com.example.spacer.social.FindPeopleScreen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private val tabs = listOf("Invites & hosting", "Find people")
@@ -46,21 +55,27 @@ private val tabs = listOf("Invites & hosting", "Find people")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventsHubScreen(
+    innerEventsNav: NavHostController,
+    outerNav: NavHostController,
     onOpenInvite: (String) -> Unit,
     onOpenHostEvent: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var tabIndex by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val eventRepo = remember { EventRepository() }
     val placesRepo = remember { PlacesRepository() }
 
     var pending by remember { mutableStateOf<List<PendingInviteUi>>(emptyList()) }
-    var hosting by remember { mutableStateOf<List<EventRow>>(emptyList()) }
+    var myEvents by remember { mutableStateOf<List<MyEventHubItem>>(emptyList()) }
+    var publicEvents by remember { mutableStateOf<List<EventRow>>(emptyList()) }
     var eventPhotoUrls by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
 
-    LaunchedEffect(Unit) {
+    val innerRoute by innerEventsNav.currentBackStackEntryAsState()
+
+    suspend fun loadHubLists() {
         loading = true
         withContext(Dispatchers.IO) {
             eventRepo.listPendingInvites()
@@ -69,13 +84,18 @@ fun EventsHubScreen(
                 Toast.makeText(context, it.message ?: "Could not load invites", Toast.LENGTH_LONG).show()
             }
         withContext(Dispatchers.IO) {
-            eventRepo.listUpcomingHostedEvents()
-        }.onSuccess { hosting = it }
+            eventRepo.listMyHostingAndAttendingEvents()
+        }.onSuccess { myEvents = it }
             .onFailure {
-                Toast.makeText(context, it.message ?: "Could not load hosting", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, it.message ?: "Could not load events", Toast.LENGTH_LONG).show()
             }
-        val eventLocations = (hosting.map { it.id to (it.location ?: "") } +
-            pending.map { it.eventId to (it.location ?: "") })
+        withContext(Dispatchers.IO) {
+            eventRepo.listPublicDiscoverableEvents()
+        }.onSuccess { publicEvents = it }
+
+        val eventLocations = (myEvents.map { it.event.id to (it.event.location ?: "") } +
+            pending.map { it.eventId to (it.location ?: "") } +
+            publicEvents.map { it.id to (it.location ?: "") })
             .distinctBy { it.first }
             .filter { it.second.isNotBlank() }
         eventPhotoUrls = withContext(Dispatchers.IO) {
@@ -89,6 +109,22 @@ fun EventsHubScreen(
             }.toMap()
         }
         loading = false
+    }
+
+    LaunchedEffect(innerRoute?.destination?.route, tabIndex) {
+        if (tabIndex == 0 && innerRoute?.destination?.route == "events_hub") {
+            loadHubLists()
+        }
+    }
+
+    DisposableEffect(outerNav) {
+        val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
+            if (destination.route == AppRoutes.Events) {
+                scope.launch { loadHubLists() }
+            }
+        }
+        outerNav.addOnDestinationChangedListener(listener)
+        onDispose { outerNav.removeOnDestinationChangedListener(listener) }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -105,7 +141,8 @@ fun EventsHubScreen(
             0 -> InvitesHostingTab(
                 loading = loading,
                 pending = pending,
-                hosting = hosting,
+                myEvents = myEvents,
+                publicEvents = publicEvents,
                 eventPhotoUrls = eventPhotoUrls,
                 onOpenInvite = onOpenInvite,
                 onOpenHostEvent = onOpenHostEvent
@@ -119,7 +156,8 @@ fun EventsHubScreen(
 private fun InvitesHostingTab(
     loading: Boolean,
     pending: List<PendingInviteUi>,
-    hosting: List<EventRow>,
+    myEvents: List<MyEventHubItem>,
+    publicEvents: List<EventRow>,
     eventPhotoUrls: Map<String, String>,
     onOpenInvite: (String) -> Unit,
     onOpenHostEvent: (String) -> Unit
@@ -132,11 +170,11 @@ private fun InvitesHostingTab(
     ) {
         item {
             Text(
-                "You’re hosting",
+                "Your events",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
             Text(
-                "Open an event to see when guests are free (availability they share in the app).",
+                "Everything you’re hosting or attending, soonest first.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
             )
@@ -144,23 +182,31 @@ private fun InvitesHostingTab(
         }
         if (loading) {
             item { Text("Loading…") }
-        } else if (hosting.isEmpty()) {
+        } else if (myEvents.isEmpty()) {
             item {
                 Text(
-                    "No upcoming hosted events. Create one from the Create tab.",
+                    "No personal events yet. Create one from the Create tab, accept an invite below, or browse public events.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                 )
             }
         } else {
-            items(hosting, key = { it.id }) { ev ->
+            items(myEvents, key = { it.event.id }) { item ->
+                val ev = item.event
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onOpenHostEvent(ev.id) },
+                        .clickable {
+                            if (item.isHosting) onOpenHostEvent(ev.id)
+                            else onOpenInvite(ev.id)
+                        },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        Modifier.padding(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         eventPhotoUrls[ev.id]?.let { imageUrl ->
                             AsyncImage(
                                 model = imageUrl,
@@ -171,8 +217,14 @@ private fun InvitesHostingTab(
                                 contentScale = ContentScale.Crop
                             )
                         }
-                        Column {
-                            Text(ev.title, fontWeight = FontWeight.SemiBold)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(ev.title, fontWeight = FontWeight.SemiBold)
+                                RoleChip(isHosting = item.isHosting)
+                            }
                             Text(ev.startsAt, style = MaterialTheme.typography.bodySmall)
                             ev.location?.takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall)
@@ -186,7 +238,79 @@ private fun InvitesHostingTab(
         item {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                "Invitations",
+                "Public events",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+            Text(
+                "Discoverable listings (run database/supabase_public_event_invites.sql in Supabase).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        if (!loading && publicEvents.isEmpty()) {
+            item {
+                Text(
+                    "No public listings yet. New events you create are registered here when the table exists.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                )
+            }
+        } else if (!loading) {
+            items(publicEvents, key = { it.id }) { ev ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenInvite(ev.id) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Row(
+                        Modifier.padding(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        eventPhotoUrls[ev.id]?.let { imageUrl ->
+                            AsyncImage(
+                                model = imageUrl,
+                                contentDescription = "Event place image",
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(ev.title, fontWeight = FontWeight.SemiBold)
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.25f)
+                                ) {
+                                    Text(
+                                        "Public",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                            Text(ev.startsAt, style = MaterialTheme.typography.bodySmall)
+                            ev.location?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                "Pending invitations",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
             Spacer(modifier = Modifier.height(4.dp))
@@ -231,5 +355,21 @@ private fun InvitesHostingTab(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RoleChip(isHosting: Boolean) {
+    val label = if (isHosting) "Hosting" else "Attending"
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
     }
 }
