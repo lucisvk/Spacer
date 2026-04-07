@@ -45,15 +45,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import coil.compose.rememberAsyncImagePainter
 import com.example.spacer.network.SessionPrefs
-import com.example.spacer.ui.theme.SpacerPurpleBackground
 import com.example.spacer.ui.theme.SpacerPurpleOutline
-import com.example.spacer.ui.theme.SpacerPurpleSurface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -123,7 +122,7 @@ fun HomeScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(SpacerPurpleBackground)
+            .background(MaterialTheme.colorScheme.background)
             .pullRefresh(pullRefreshState)
     ) {
         StarFieldBackground()
@@ -270,19 +269,29 @@ private fun HeaderRow(
 
             Spacer(modifier = Modifier.width(10.dp))
             Column {
-                Text("Hi! Welcome to Spacer !", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Hi! Welcome to Spacer !",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f)
+                )
                 Text(
                     userName,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onBackground
                 )
             }
         }
 
         Column(horizontalAlignment = Alignment.End) {
-            Text("Current location", style = MaterialTheme.typography.bodySmall)
+            Text(
+                "Current location",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f)
+            )
             Text(
                 locationLabel,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onBackground
             )
         }
     }
@@ -290,6 +299,8 @@ private fun HeaderRow(
 
 @Composable
 private fun StarFieldBackground() {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.45f
+    val starBase = MaterialTheme.colorScheme.onBackground
     val stars = remember {
         List(100) {
             val x = Random(1234 + it).nextFloat()
@@ -302,8 +313,9 @@ private fun StarFieldBackground() {
 
     Canvas(modifier = Modifier.fillMaxSize()) {
         stars.forEach { star ->
+            val a = if (dark) star.alpha else star.alpha * 0.35f
             drawCircle(
-                color = Color.White.copy(alpha = star.alpha),
+                color = starBase.copy(alpha = a),
                 radius = star.radius,
                 center = androidx.compose.ui.geometry.Offset(
                     x = star.x * size.width,
@@ -324,7 +336,7 @@ private data class Star(
 @Composable
 private fun SearchBarPlaceholder() {
     Surface(
-        color = SpacerPurpleSurface.copy(alpha = 0.35f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
         shape = RoundedCornerShape(18.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -335,7 +347,8 @@ private fun SearchBarPlaceholder() {
         ) {
             Text(
                 "Find amazing events",
-                style = MaterialTheme.typography.bodyMedium.copy(color = Color(0xFFB6AEFF))
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Box(
                 modifier = Modifier
@@ -352,11 +365,13 @@ private fun SectionHeader(title: String, action: String) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(
             title,
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onBackground
         )
         Text(
             action,
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.primary
         )
     }
 }
@@ -375,11 +390,15 @@ private fun CategoryChipRow() {
 private fun SimpleChip(label: String) {
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = Color(0xFF6D40FF).copy(alpha = 0.35f),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
         modifier = Modifier
     ) {
         Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Text(label, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold))
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }
@@ -393,7 +412,7 @@ private fun DummyEventCard(
 ) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF12084A).copy(alpha = 0.6f),
+        color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -402,13 +421,25 @@ private fun DummyEventCard(
                     .fillMaxWidth()
                     .height(120.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF2A1A63))
+                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
             )
             Spacer(modifier = Modifier.height(10.dp))
-            Text(title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = Color.White)
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
             Spacer(modifier = Modifier.height(4.dp))
-            Text(date, style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFB9B1FF)))
-            Text(place, style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFB9B1FF)))
+            Text(
+                date,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                place,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(modifier = Modifier.height(10.dp))
             Button(onClick = onJoin, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
                 Text("JOIN NOW")
@@ -426,7 +457,7 @@ private fun DummyCategoryRow(
 ) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF2B1C70).copy(alpha = 0.65f),
+        color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -434,14 +465,26 @@ private fun DummyCategoryRow(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF6D40FF).copy(alpha = 0.35f))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = Color.White)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(date, style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFB9B1FF)))
-                Text(place, style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFB9B1FF)))
+                Text(
+                    date,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    place,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(onClick = onJoin, shape = RoundedCornerShape(10.dp)) {

@@ -31,7 +31,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.spacer.network.SupabaseManager
 import com.example.spacer.profile.EventRow
+import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,18 +62,22 @@ fun InviteEventScreen(
     var event by remember { mutableStateOf<EventRow?>(null) }
     var loading by remember { mutableStateOf(true) }
     var inviteStatus by remember { mutableStateOf<String?>(null) }
+    var publicListingOnly by remember { mutableStateOf(false) }
     var selectedPresets by remember { mutableStateOf(setOf<String>()) }
     var notes by remember { mutableStateOf("") }
 
     LaunchedEffect(eventId) {
         loading = true
-        withContext(Dispatchers.IO) { repo.getEvent(eventId) }
-            .onSuccess { event = it }
-            .onFailure {
-                Toast.makeText(context, it.message ?: "Failed to load event", Toast.LENGTH_LONG).show()
-            }
-        withContext(Dispatchers.IO) { repo.getInviteStatusForEvent(eventId) }
-            .onSuccess { inviteStatus = it }
+        publicListingOnly = false
+        val ev = withContext(Dispatchers.IO) { repo.getEvent(eventId).getOrNull() }
+        event = ev
+        if (ev == null) {
+            Toast.makeText(context, "Failed to load event", Toast.LENGTH_LONG).show()
+        }
+        val status = withContext(Dispatchers.IO) { repo.getInviteStatusForEvent(eventId).getOrNull() }
+        inviteStatus = status
+        val uid = SupabaseManager.client.auth.currentUserOrNull()?.id
+        publicListingOnly = uid != null && ev != null && ev.hostId != uid && status == null
         loading = false
     }
 
@@ -82,7 +88,10 @@ fun InviteEventScreen(
             .padding(16.dp)
             .verticalScroll(scroll)
     ) {
-        Text("Invitation", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+        Text(
+            text = if (publicListingOnly && !loading) "Public event" else "Invitation",
+            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
+        )
         Spacer(Modifier.padding(8.dp))
 
         if (loading || event == null) {
@@ -91,6 +100,7 @@ fun InviteEventScreen(
             InviteEventBody(
                 e = event!!,
                 inviteStatus = inviteStatus,
+                publicListingOnly = publicListingOnly,
                 selectedPresets = selectedPresets,
                 onPresetsChange = { selectedPresets = it },
                 notes = notes,
@@ -159,6 +169,7 @@ fun InviteEventScreen(
 private fun InviteEventBody(
     e: EventRow,
     inviteStatus: String?,
+    publicListingOnly: Boolean,
     selectedPresets: Set<String>,
     onPresetsChange: (Set<String>) -> Unit,
     notes: String,
@@ -179,6 +190,34 @@ private fun InviteEventBody(
     }
     e.location?.takeIf { it.isNotBlank() }?.let {
         Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+    }
+
+    if (publicListingOnly) {
+        Spacer(Modifier.padding(10.dp))
+        Text(
+            "You’re viewing a public listing. Ask the host to invite you if you want to RSVP or share availability in the app.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+        )
+        Spacer(Modifier.padding(12.dp))
+        OutlinedButton(onClick = onCalendarClick, modifier = Modifier.fillMaxWidth()) {
+            Text("Open in calendar app (Google / Apple / other)")
+        }
+        Text(
+            "This opens your device calendar so you can save the time locally.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            modifier = Modifier.padding(top = 6.dp)
+        )
+        OutlinedButton(
+            onClick = onBack,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp)
+        ) {
+            Text("Back")
+        }
+        return
     }
 
     Spacer(Modifier.padding(12.dp))

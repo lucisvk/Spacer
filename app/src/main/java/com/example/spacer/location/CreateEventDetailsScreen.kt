@@ -34,7 +34,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -42,10 +41,6 @@ import com.example.spacer.events.EventRepository
 import com.example.spacer.profile.FriendListItem
 import com.example.spacer.profile.ProfileRepository
 import com.example.spacer.profile.SearchUserRow
-import com.example.spacer.ui.theme.SpacerPurpleBackground
-import com.example.spacer.ui.theme.SpacerPurpleOutline
-import com.example.spacer.ui.theme.SpacerPurplePrimary
-import com.example.spacer.ui.theme.SpacerPurpleSurface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
@@ -114,7 +109,7 @@ fun CreateEventDetailsScreen(
 
     Surface(
         modifier = modifier.fillMaxSize(),
-        color = SpacerPurpleBackground
+        color = MaterialTheme.colorScheme.background
     ) {
         LazyColumn(
             modifier = Modifier
@@ -125,12 +120,12 @@ fun CreateEventDetailsScreen(
                 Text(
                     text = "Event details",
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFFF4EEFF)
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
                     text = "Step 2 of 2 — Description, schedule, and invites.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFB9B1FF),
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
                     modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
                 )
                 OutlinedButton(onClick = onBack, modifier = Modifier.padding(bottom = 12.dp)) {
@@ -138,19 +133,35 @@ fun CreateEventDetailsScreen(
                 }
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = SpacerPurpleSurface,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 12.dp)
                 ) {
                     Column(Modifier.padding(14.dp)) {
-                        Text("Venue", style = MaterialTheme.typography.labelMedium, color = SpacerPurplePrimary)
-                        Text(place.name, color = Color(0xFFF4EEFF), style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Venue",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            place.name,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.titleSmall
+                        )
                         if (place.address.isNotBlank()) {
-                            Text(place.address, style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9B1FF))
+                            Text(
+                                place.address,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                         Spacer(Modifier.height(8.dp))
-                        Text("Title", style = MaterialTheme.typography.labelMedium, color = SpacerPurplePrimary)
+                        Text(
+                            "Title",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                         OutlinedTextField(
                             value = eventTitle,
                             onValueChange = onEventTitleChange,
@@ -176,7 +187,7 @@ fun CreateEventDetailsScreen(
                 Text(
                     "Date & time",
                     style = MaterialTheme.typography.labelLarge,
-                    color = Color(0xFFB9B1FF)
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
@@ -219,19 +230,19 @@ fun CreateEventDetailsScreen(
                 Text(
                     "Invite people",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = Color(0xFFF4EEFF)
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
                     "Toggle friends or search by name to add invitees.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFB9B1FF),
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
                     modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
                 )
                 if (friends.isEmpty()) {
                     Text(
                         "No friends yet — use Find people under Events to connect.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF8A82C8)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
                     Row(
@@ -248,9 +259,12 @@ fun CreateEventDetailsScreen(
                                 },
                                 label = { Text(f.fullName) },
                                 colors = AssistChipDefaults.assistChipColors(
-                                    containerColor = if (on) SpacerPurplePrimary.copy(alpha = 0.4f)
-                                    else SpacerPurpleSurface,
-                                    labelColor = Color(0xFFF4EEFF)
+                                    containerColor = if (on) {
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    },
+                                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             )
                         }
@@ -270,7 +284,7 @@ fun CreateEventDetailsScreen(
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp,
-                        color = SpacerPurplePrimary
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
                 inviteSearchResults.forEach { u ->
@@ -283,13 +297,13 @@ fun CreateEventDetailsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 u.fullName?.ifBlank { u.username ?: "User" } ?: (u.username ?: "User"),
-                                color = Color(0xFFF4EEFF),
+                                color = MaterialTheme.colorScheme.onBackground,
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Text(
                                 "@${u.username ?: "user"}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFB9B1FF)
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f)
                             )
                         }
                         val added = u.id in invitedIds
@@ -382,13 +396,13 @@ private fun buildOffsetIso(dateStr: String, timeStr: String): String {
 
 @Composable
 private fun detailsFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = Color(0xFFF4EEFF),
-    unfocusedTextColor = Color(0xFFF4EEFF),
-    focusedBorderColor = SpacerPurplePrimary,
-    unfocusedBorderColor = SpacerPurpleOutline,
-    cursorColor = SpacerPurplePrimary,
-    focusedLabelColor = Color(0xFFB9B1FF),
-    unfocusedLabelColor = Color(0xFF8A82C8),
-    focusedPlaceholderColor = Color(0xFF6F6699),
-    unfocusedPlaceholderColor = Color(0xFF6F6699)
+    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+    focusedBorderColor = MaterialTheme.colorScheme.primary,
+    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+    cursorColor = MaterialTheme.colorScheme.primary,
+    focusedLabelColor = MaterialTheme.colorScheme.primary,
+    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+    unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
 )
