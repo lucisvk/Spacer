@@ -53,10 +53,6 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.spacer.BuildConfig
-import com.example.spacer.ui.theme.SpacerPurpleBackground
-import com.example.spacer.ui.theme.SpacerPurpleOutline
-import com.example.spacer.ui.theme.SpacerPurplePrimary
-import com.example.spacer.ui.theme.SpacerPurpleSurface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
@@ -224,7 +220,7 @@ fun CreateEventPlaceScreen(
 
     Surface(
         modifier = modifier.fillMaxSize(),
-        color = SpacerPurpleBackground
+        color = MaterialTheme.colorScheme.background
     ) {
         LazyColumn(
             modifier = Modifier
@@ -238,12 +234,12 @@ fun CreateEventPlaceScreen(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp
                     ),
-                    color = Color(0xFFF4EEFF)
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
                     text = "Step 1 of 2 — Choose a venue and name your event.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFB9B1FF),
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
                     modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
                 )
             }
@@ -260,21 +256,21 @@ fun CreateEventPlaceScreen(
                 if (!fine && !coarse) {
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = SpacerPurpleSurface,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, SpacerPurpleOutline, RoundedCornerShape(14.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp))
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
                             Text(
                                 "Location is off",
                                 style = MaterialTheme.typography.titleSmall,
-                                color = Color(0xFFF4EEFF)
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 "Allow location to load venues near you.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFB9B1FF),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
                             )
                             OutlinedButton(
@@ -299,10 +295,10 @@ fun CreateEventPlaceScreen(
                 item {
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = SpacerPurpleSurface,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, SpacerPurpleOutline, RoundedCornerShape(14.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp))
                     ) {
                         Text(
                             text = "Add PLACES_API_KEY to local.properties and enable Places API (New) in Google Cloud.",
@@ -385,7 +381,7 @@ fun CreateEventPlaceScreen(
                         CircularProgressIndicator(
                             modifier = Modifier.size(22.dp),
                             strokeWidth = 2.dp,
-                            color = SpacerPurplePrimary
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -396,7 +392,7 @@ fun CreateEventPlaceScreen(
                 Text(
                     text = if (showingSearch) "Search results" else "Nearby picks",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = Color(0xFFF4EEFF)
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -414,9 +410,12 @@ fun CreateEventPlaceScreen(
                             onClick = { categoryFilter = key },
                             label = { Text(label) },
                             colors = AssistChipDefaults.assistChipColors(
-                                containerColor = if (selected) SpacerPurplePrimary.copy(alpha = 0.35f)
-                                else SpacerPurpleSurface,
-                                labelColor = Color(0xFFF4EEFF)
+                                containerColor = if (selected) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         )
                     }
@@ -429,7 +428,7 @@ fun CreateEventPlaceScreen(
                     Text(
                         "Selected venue",
                         style = MaterialTheme.typography.labelLarge,
-                        color = SpacerPurplePrimary
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     PlaceCard(
@@ -490,15 +489,15 @@ fun CreateEventPlaceScreen(
 
 @Composable
 private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = Color(0xFFF4EEFF),
-    unfocusedTextColor = Color(0xFFF4EEFF),
-    focusedBorderColor = SpacerPurplePrimary,
-    unfocusedBorderColor = SpacerPurpleOutline,
-    cursorColor = SpacerPurplePrimary,
-    focusedLabelColor = Color(0xFFB9B1FF),
-    unfocusedLabelColor = Color(0xFF8A82C8),
-    focusedPlaceholderColor = Color(0xFF6F6699),
-    unfocusedPlaceholderColor = Color(0xFF6F6699)
+    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+    focusedBorderColor = MaterialTheme.colorScheme.primary,
+    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+    cursorColor = MaterialTheme.colorScheme.primary,
+    focusedLabelColor = MaterialTheme.colorScheme.primary,
+    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+    unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
 )
 
 @Composable
@@ -509,11 +508,15 @@ private fun PlaceCard(
     onOpenDetail: () -> Unit,
     onSelectForEvent: () -> Unit
 ) {
-    val borderColor = if (selected) SpacerPurplePrimary else SpacerPurpleOutline
+    val borderColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.outline
+    }
     val thumbUrl = place.primaryPhotoName?.let { placesRepository.photoMediaUrl(it, 400) }
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = SpacerPurpleSurface),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         modifier = Modifier
             .fillMaxWidth()
             .border(1.dp, borderColor, RoundedCornerShape(16.dp))
@@ -528,7 +531,7 @@ private fun PlaceCard(
             ) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = SpacerPurpleOutline.copy(alpha = 0.35f),
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
                     modifier = Modifier.size(88.dp)
                 ) {
                     if (thumbUrl != null) {
@@ -554,14 +557,14 @@ private fun PlaceCard(
                     Text(
                         place.name,
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = Color(0xFFF4EEFF)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     place.rating?.let { r ->
                         val c = place.userRatingCount ?: 0
                         Text(
                             "★ ${"%.1f".format(r)} · $c reviews",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFB9B1FF),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
@@ -569,7 +572,7 @@ private fun PlaceCard(
                         Text(
                             place.address,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFB9B1FF),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
@@ -588,12 +591,12 @@ private fun PlaceCard(
                     place.categoryTags().forEach { tag ->
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF6D40FF).copy(alpha = 0.22f)
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
                         ) {
                             Text(
                                 tag,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFFE8E0FF),
+                                color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                             )
                         }
@@ -606,13 +609,13 @@ private fun PlaceCard(
                 Text(
                     "Hours",
                     style = MaterialTheme.typography.labelMedium,
-                    color = Color(0xFFB9B1FF)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 place.weekdayHours.take(3).forEach { line ->
                     Text(
                         line,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFD8D2FF),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
@@ -620,7 +623,7 @@ private fun PlaceCard(
                     Text(
                         "…",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF8A82C8)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                     )
                 }
             }

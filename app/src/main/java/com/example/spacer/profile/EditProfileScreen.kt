@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
+import com.example.spacer.network.SessionPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,6 +52,7 @@ fun EditProfileScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val sessionPrefs = remember { SessionPrefs(context) }
     val repository = remember { ProfileRepository() }
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
@@ -173,6 +175,12 @@ fun EditProfileScreen(
                             aboutMe = aboutMe.trim()
                         )
                     }.onSuccess {
+                        val label = fullName.trim().ifBlank {
+                            username.trim().ifBlank { email.trim().substringBefore("@") }
+                        }
+                        if (label.isNotBlank()) {
+                            sessionPrefs.saveProfileName(label)
+                        }
                         Toast.makeText(context, "Profile saved", Toast.LENGTH_SHORT).show()
                         onBack()
                     }.onFailure {
