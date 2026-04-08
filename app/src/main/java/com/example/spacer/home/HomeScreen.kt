@@ -52,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -64,10 +65,13 @@ import com.example.spacer.events.formatEventDateNoTime
 import com.example.spacer.location.PlacesRepository
 import com.example.spacer.network.SessionPrefs
 import com.example.spacer.profile.EventRow
+import com.example.spacer.profile.PresenceStatus
+import com.example.spacer.profile.ProfileRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.random.Random
 
@@ -83,6 +87,7 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val eventRepo = remember { EventRepository() }
     val placesRepo = remember { PlacesRepository() }
+    val profileRepo = remember { ProfileRepository() }
 
     var userName by remember { mutableStateOf("User") }
     var locationLabel by remember { mutableStateOf("Not set") }
@@ -93,6 +98,7 @@ fun HomeScreen(
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var homeEventsLoading by remember { mutableStateOf(true) }
+    var myPresence by remember { mutableStateOf(PresenceStatus.OFFLINE) }
 
     suspend fun loadDiscoverable() {
         homeEventsLoading = true
@@ -104,6 +110,7 @@ fun HomeScreen(
         upcomingEvents = list
         val locs = list.map { it.id to (it.location ?: "") }.filter { it.second.isNotBlank() }
         eventPhotoUrls = withContext(Dispatchers.IO) {
+            if (!PlacesRepository.isApiKeyConfigured()) return@withContext emptyMap()
             locs.mapNotNull { (eventId, location) ->
                 val photoName = placesRepo.searchText(location)
                     .getOrDefault(emptyList())
@@ -120,6 +127,12 @@ fun HomeScreen(
         userName = sessionPrefs.getProfileName().ifBlank { "User" }
         locationLabel = sessionPrefs.getLocationLabel().ifBlank { "Not set" }
         profileImageUri = sessionPrefs.getProfileImageUri()
+        myPresence = PresenceStatus.fromDb(sessionPrefs.getPresenceStatus())
+        val live = withContext(Dispatchers.IO) { profileRepo.load().getOrNull() }?.profile?.presenceStatus
+        if (!live.isNullOrBlank()) {
+            myPresence = PresenceStatus.fromDb(live)
+            sessionPrefs.savePresenceStatus(myPresence.dbValue)
+        }
         loadDiscoverable()
     }
 
@@ -169,8 +182,6 @@ fun HomeScreen(
             .background(MaterialTheme.colorScheme.background)
             .pullRefresh(pullRefreshState)
     ) {
-        StarFieldBackground()
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -180,7 +191,8 @@ fun HomeScreen(
             HeaderRow(
                 userName = userName,
                 locationLabel = locationLabel,
-                profileImageUri = profileImageUri
+                profileImageUri = profileImageUri,
+                presenceStatus = myPresence
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -188,40 +200,7 @@ fun HomeScreen(
                 query = searchQuery,
                 onQueryChange = { searchQuery = it }
             )
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Button(
-                onClick = {
-                    val hasFine = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.ACCESS_FINE_LOCATION
-                    ) == PackageManager.PERMISSION_GRANTED
-                    val hasCoarse = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    ) == PackageManager.PERMISSION_GRANTED
-
-                    if (hasFine || hasCoarse) {
-                        val label = resolveLocationLabel(context)
-                        locationLabel = label
-                        sessionPrefs.saveLocationLabel(label)
-                    } else {
-                        locationPermissionLauncher.launch(
-                            arrayOf(
-                                Manifest.permission.ACCESS_FINE_LOCATION,
-                                Manifest.permission.ACCESS_COARSE_LOCATION
-                            )
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Use my location")
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            SectionHeader("Upcoming Events", "VIEW ALL", onAction = onViewAllEvents)
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             val tagOptions = remember(upcomingEvents) {
                 val fromDb = upcomingEvents.mapNotNull { it.category?.takeIf { c -> c.isNotBlank() } }.distinct()
@@ -231,15 +210,33 @@ fun HomeScreen(
                 if (selectedCategory == null) upcomingEvents
                 else upcomingEvents.filter { it.category == selectedCategory }
             }
-            val searched = remember(filtered, searchQuery) {
+            val userStateCode = remember(locationLabel) { extractUsStateCode(locationLabel) }
+            val zoned = remember(filtered, searchQuery, userStateCode) {
+                if (searchQuery.trim().isNotBlank() || userStateCode == null) {
+                    filtered
+                } else {
+                    filtered.filter { ev ->
+                        val eventState = extractUsStateCode(ev.location)
+                        eventState == null || eventState == userStateCode
+                    }
+                }
+            }
+            val searched = remember(zoned, searchQuery) {
                 val q = searchQuery.trim().lowercase()
-                if (q.isBlank()) filtered
-                else filtered.filter { ev ->
+                if (q.isBlank()) zoned
+                else zoned.filter { ev ->
                     ev.title.lowercase().contains(q) ||
                         (ev.location?.lowercase()?.contains(q) == true) ||
                         (ev.category?.lowercase()?.contains(q) == true)
                 }
             }
+
+            Text(
+                "UP NEXT FOR YOU",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
 
             if (homeEventsLoading) {
                 Text("Loading events…", style = MaterialTheme.typography.bodyMedium)
@@ -250,38 +247,26 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f)
                 )
             } else {
-                val firstRow = searched.take(2)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    firstRow.forEach { ev ->
-                        Box(modifier = Modifier.weight(1f, fill = true)) {
-                            DiscoverEventCard(
-                                event = ev,
-                                imageUrl = eventPhotoUrls[ev.id],
-                                onJoin = {
-                                    sessionPrefs.incrementAttendedCount()
-                                    onViewAllEvents()
-                                }
-                            )
-                        }
-                    }
-                    if (firstRow.size == 1) {
-                        Spacer(modifier = Modifier.weight(1f, fill = true))
-                    }
-                }
+                UpNextCard(
+                    event = searched.first(),
+                    onOpenChat = onViewAllEvents,
+                    onDetails = onViewAllEvents
+                )
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
-            SectionHeader("Choose By Category", "VIEW ALL", onAction = onViewAllEvents)
+            Spacer(modifier = Modifier.height(14.dp))
             Spacer(modifier = Modifier.height(10.dp))
             CategoryChipRow(
                 tags = tagOptions,
                 selected = selectedCategory,
                 onSelected = { selectedCategory = it }
             )
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+            SectionHeader("Near you", "View all", onAction = onViewAllEvents)
+            Spacer(modifier = Modifier.height(10.dp))
 
             if (!homeEventsLoading && searched.isNotEmpty()) {
-                searched.drop(2).forEach { ev ->
+                searched.take(4).forEach { ev ->
                     DiscoverCategoryRow(
                         event = ev,
                         imageUrl = eventPhotoUrls[ev.id],
@@ -292,7 +277,9 @@ fun HomeScreen(
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+            HostOwnCard(onClick = onViewAllEvents)
+            Spacer(modifier = Modifier.height(28.dp))
         }
 
         PullRefreshIndicator(
@@ -307,8 +294,15 @@ fun HomeScreen(
 private fun HeaderRow(
     userName: String,
     locationLabel: String,
-    profileImageUri: String?
+    profileImageUri: String?,
+    presenceStatus: PresenceStatus
 ) {
+    val screenWidth = LocalConfiguration.current.screenWidthDp
+    val avatarSize = when {
+        screenWidth < 360 -> 44.dp
+        screenWidth > 420 -> 60.dp
+        else -> 52.dp
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -319,7 +313,7 @@ private fun HeaderRow(
                 if (profileImageUri.isNullOrBlank()) {
                     Spacer(
                         modifier = Modifier
-                            .size(52.dp)
+                            .size(avatarSize)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primary)
                     )
@@ -327,7 +321,8 @@ private fun HeaderRow(
                     Image(
                         painter = rememberAsyncImagePainter(profileImageUri),
                         contentDescription = "User profile picture",
-                        modifier = Modifier.size(52.dp).clip(CircleShape)
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(avatarSize).clip(CircleShape)
                     )
                 }
 
@@ -336,14 +331,14 @@ private fun HeaderRow(
                         .align(Alignment.BottomEnd)
                         .size(16.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF22C55E))
+                        .background(presenceStatus.dotColor)
                 )
             }
 
             Spacer(modifier = Modifier.width(10.dp))
             Column {
                 Text(
-                    "Hi! Welcome to Spacer !",
+                    "Hey,",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f)
                 )
@@ -355,16 +350,15 @@ private fun HeaderRow(
             }
         }
 
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                "Current location",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f)
-            )
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        ) {
             Text(
                 locationLabel,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onBackground
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
             )
         }
     }
@@ -420,7 +414,7 @@ private fun SearchBar(
             value = query,
             onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-            placeholder = { Text("Search events by name, location, or tag") },
+            placeholder = { Text("Search events, places, or tags...") },
             singleLine = true
         )
     }
@@ -431,12 +425,12 @@ private fun SectionHeader(title: String, action: String, onAction: () -> Unit = 
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(
             title,
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onBackground
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f)
         )
         Text(
             action,
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.clickable { onAction() }
         )
@@ -460,7 +454,10 @@ private fun CategoryChipRow(
             selected = allSelected,
             onClick = { onSelected(null) },
             label = { Text("All") },
-            colors = FilterChipDefaults.filterChipColors()
+            colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            )
         )
         tags.forEach { tag ->
             val on = selected == tag
@@ -468,7 +465,10 @@ private fun CategoryChipRow(
                 selected = on,
                 onClick = { onSelected(if (on) null else tag) },
                 label = { Text(tag) },
-                colors = FilterChipDefaults.filterChipColors()
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                )
             )
         }
     }
@@ -542,7 +542,11 @@ private fun DiscoverCategoryRow(
     imageUrl: String?,
     onJoin: () -> Unit
 ) {
-    val place = event.location?.takeIf { it.isNotBlank() } ?: "Location TBD"
+    val place = event.location?.takeIf { it.isNotBlank() }?.let { shortenAddressNoStateZip(it) } ?: "Location TBD"
+    val start = runCatching { OffsetDateTime.parse(event.startsAt) }.getOrNull()
+    val month = start?.month?.name?.take(3) ?: "TBD"
+    val day = start?.dayOfMonth?.toString() ?: "--"
+    val time = formatTime12Hour(event.startsAt)
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -551,17 +555,15 @@ private fun DiscoverCategoryRow(
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                    .size(70.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center
             ) {
-                if (!imageUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = imageUrl,
-                        contentDescription = "Event image",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(month, style = MaterialTheme.typography.labelSmall)
+                    Text(day, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                    Text(time, style = MaterialTheme.typography.labelSmall)
                 }
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -582,14 +584,136 @@ private fun DiscoverCategoryRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    "${((event.id.hashCode() and 0x7fffffff) % 12) + 1} going",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+                )
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Button(onClick = onJoin, shape = RoundedCornerShape(10.dp)) {
-                Text("JOIN NOW")
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF2E8B57).copy(alpha = 0.25f)
+            ) {
+                Text(
+                    "Public",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF9FF5BC),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                )
             }
         }
     }
     Spacer(modifier = Modifier.height(10.dp))
+}
+
+@Composable
+private fun UpNextCard(
+    event: EventRow,
+    onOpenChat: () -> Unit,
+    onDetails: () -> Unit
+) {
+    val place = event.location?.takeIf { it.isNotBlank() } ?: "Location TBD"
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    formatEventDateNoTime(event.startsAt),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                )
+                Text(
+                    timeUntilLabel(event.startsAt),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF9FF5BC)
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                event.title,
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                place,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onOpenChat,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Open chat") }
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f),
+                    modifier = Modifier.clickable { onDetails() }
+                ) {
+                    Text(
+                        "Details",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun timeUntilLabel(startsAt: String): String {
+    val start = runCatching { OffsetDateTime.parse(startsAt) }.getOrNull() ?: return "Soon"
+    val now = OffsetDateTime.now()
+    val mins = java.time.Duration.between(now, start).toMinutes()
+    if (mins <= 0) return "Started"
+    if (mins < 60) return "In ${mins}m"
+    val hours = mins / 60
+    if (hours < 24) return "In ${hours}h"
+    val days = hours / 24
+    return "In ${days}d"
+}
+
+@Composable
+private fun HostOwnCard(onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("+", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimary)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Host your own", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                Text(
+                    "Plan something with your friends",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                )
+            }
+            Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
 }
 
 private fun resolveLocationLabel(context: Context): String {
@@ -603,8 +727,9 @@ private fun resolveLocationLabel(context: Context): String {
         val addresses = geocoder.getFromLocation(location.latitude, location.longitude, 1)
         val first = addresses?.firstOrNull()
         val city = first?.locality ?: first?.subAdminArea ?: "Unknown city"
+        val state = first?.adminArea?.takeIf { it.isNotBlank() } ?: ""
         val code = first?.postalCode ?: "Unknown ZIP"
-        "$city, $code"
+        if (state.isNotBlank()) "$city, $state $code" else "$city, $code"
     } catch (_: Exception) {
         "Location unavailable"
     }
@@ -614,4 +739,24 @@ private fun pickBestLocation(first: Location?, second: Location?): Location? {
     if (first == null) return second
     if (second == null) return first
     return if (first.accuracy <= second.accuracy) first else second
+}
+
+private fun extractUsStateCode(value: String?): String? {
+    val raw = value?.uppercase(Locale.US) ?: return null
+    val match = Regex("\\b([A-Z]{2})\\s+\\d{5}(?:-\\d{4})?\\b").find(raw)
+    return match?.groupValues?.getOrNull(1)
+}
+
+private fun formatTime12Hour(startsAt: String): String {
+    val value = runCatching { OffsetDateTime.parse(startsAt) }.getOrNull() ?: return "--:--"
+    return value.format(DateTimeFormatter.ofPattern("h:mm a", Locale.US))
+}
+
+private fun shortenAddressNoStateZip(full: String): String {
+    val parts = full.split(",").map { it.trim() }.filter { it.isNotBlank() }
+    return when {
+        parts.size >= 2 -> "${parts[0]}, ${parts[1]}"
+        parts.size == 1 -> parts[0]
+        else -> full
+    }
 }

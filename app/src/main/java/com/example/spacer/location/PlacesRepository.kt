@@ -19,6 +19,11 @@ import kotlinx.serialization.json.Json
 /**
  * Google Places API (New) — nearby + text search.
  * Dashboard: enable "Places API (New)", billing on; restrict API key to Android app + Places.
+ *
+ * **When Google Cloud / Places billing applies:** every successful HTTP call below counts against
+ * your Places quota (and can incur cost once past free tier): [searchNearby], [searchText],
+ * [fetchPlaceDetails], and each [photoMediaUrl] load (photo endpoint uses the same API key).
+ * This does **not** run from calendar overlap code — that uses the on-device [android.provider.CalendarContract] API only.
  */
 class PlacesRepository(
     private val apiKey: String = BuildConfig.PLACES_API_KEY
@@ -197,5 +202,11 @@ class PlacesRepository(
         private const val SEARCH_TEXT_URL = "https://places.googleapis.com/v1/places:searchText"
 
         internal fun placePathId(raw: String): String = raw.trim().removePrefix("places/")
+
+        /**
+         * False when `PLACES_API_KEY` was not set at build time ([BuildConfig.PLACES_API_KEY] empty).
+         * In that case all Places HTTP calls would fail — set the key in `local.properties` and rebuild.
+         */
+        fun isApiKeyConfigured(): Boolean = BuildConfig.PLACES_API_KEY.isNotBlank()
     }
 }
