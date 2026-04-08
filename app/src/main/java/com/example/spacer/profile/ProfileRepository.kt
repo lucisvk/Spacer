@@ -2,6 +2,7 @@ package com.example.spacer.profile
 
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import com.example.spacer.network.SupabaseManager
@@ -65,12 +66,10 @@ data class EventRow(
 )
 
 @Serializable
-private data class EventAttendeeRow(
+private data class EventInviteAcceptedRow(
     @SerialName("event_id")
     val eventId: String,
-    @SerialName("user_id")
-    val userId: String,
-    val status: String = "attending"
+    val status: String = "accepted"
 )
 
 data class FriendListItem(
@@ -113,8 +112,51 @@ private data class AccountDeletionRequestInsert(
     val reason: String? = null
 )
 
+/** In-app sample people so Find people works before extra Supabase profiles exist. */
+private object FindPeopleDemoDirectory {
+    private val rows: List<SearchUserRow> = listOf(
+        SearchUserRow(
+            id = "11111111-1111-4111-8111-111111111101",
+            username = "alex_spacer",
+            email = "alex.demo@spacer.app",
+            fullName = "Alex Demo",
+            avatarUrl = null
+        ),
+        SearchUserRow(
+            id = "11111111-1111-4111-8111-111111111102",
+            username = "sam_planner",
+            email = "sam.demo@spacer.app",
+            fullName = "Sam Planner",
+            avatarUrl = null
+        ),
+        SearchUserRow(
+            id = "11111111-1111-4111-8111-111111111103",
+            username = "river_hosts",
+            email = "river.demo@spacer.app",
+            fullName = "River Chen",
+            avatarUrl = null
+        )
+    )
+
+    fun matches(safeQuery: String): List<SearchUserRow> {
+        if (safeQuery.isBlank()) return emptyList()
+        val q = safeQuery.lowercase()
+        return rows.filter { r ->
+            listOf(r.username, r.fullName, r.email)
+                .mapNotNull { it?.lowercase() }
+                .any { it.contains(q) }
+        }
+    }
+
+    fun isDemoId(id: String): Boolean = rows.any { it.id == id }
+}
+
 class ProfileRepository {
     private val supabase = SupabaseManager.client
+
+    companion object {
+        fun isOfflineDemoProfile(id: String): Boolean = FindPeopleDemoDirectory.isDemoId(id)
+    }
 
     private fun parseDateSafely(value: String): OffsetDateTime? {
         return try {
@@ -124,24 +166,121 @@ class ProfileRepository {
         }
     }
 
+    private suspend fun pastHostedEventRows(hostUserId: String): List<EventRow> {
+        val now = OffsetDateTime.now()
+        return supabase.from("app_events")
+            .select {
+                filter { eq("host_id", hostUserId) }
+                order(column = "starts_at", order = Order.DESCENDING)
+            }
+            .decodeList<EventRow>()
+            .filter { event -> parseDateSafely(event.startsAt)?.isBefore(now) == true }
+    }
+
+    private suspend fun pastAcceptedAttendedEventRows(inviteeUserId: String): List<EventRow> {
+        val now = OffsetDateTime.now()
+        val invites = supabase.from("event_invites")
+            .select {
+                filter {
+                    eq("invitee_id", inviteeUserId)
+                    eq("status", "accepted")
+                }
+            }
+            .decodeList<EventInviteAcceptedRow>()
+        return invites.mapNotNull { inv ->
+            runCatching {
+                supabase.from("app_events")
+                    .select {
+                        filter { eq("id", inv.eventId) }
+                        limit(1)
+                    }
+                    .decodeSingle<EventRow>()
+            }.getOrNull()
+        }
+            .filter { event -> parseDateSafely(event.startsAt)?.isBefore(now) == true }
+            .sortedByDescending { parseDateSafely(it.startsAt) }
+    }
+
+    private suspend fun countAcceptedFriends(userId: String): Int {
+        val outgoing = supabase.from("friend_requests")
+            .select {
+                filter {
+                    eq("sender_id", userId)
+                    eq("status", "accepted")
+                }
+            }
+            .decodeList<FriendRequestInsert>()
+            .map { it.receiverId }
+        val incoming = supabase.from("friend_requests")
+            .select {
+                filter {
+                    eq("receiver_id", userId)
+                    eq("status", "accepted")
+                }
+            }
+            .decodeList<FriendRequestInsert>()
+            .map { it.senderId }
+        return (outgoing + incoming).distinct().size
+    }
+
+    private suspend fun countAllHostedEvents(hostUserId: String): Int {
+        return supabase.from("app_events")
+            .select {
+                filter { eq("host_id", hostUserId) }
+            }
+            .decodeList<EventRow>()
+            .size
+    }
+
+    private suspend fun countAllAcceptedInvites(inviteeUserId: String): Int {
+        val invites = supabase.from("event_invites")
+            .select {
+                filter {
+                    eq("invitee_id", inviteeUserId)
+                    eq("status", "accepted")
+                }
+            }
+            .decodeList<EventInviteAcceptedRow>()
+        return invites.map { it.eventId }.distinct().size
+    }
+
+    private fun mergeProfileWithAuthSession(profile: ProfileRow, user: io.github.jan.supabase.auth.user.UserInfo): ProfileRow {
+        val metaFull = user.userMetadata
+            ?.get("full_name")
+            ?.toString()
+            ?.trim('"', ' ')
+            ?.takeIf { it.isNotBlank() }
+        val metaName = user.userMetadata
+            ?.get("name")
+            ?.toString()
+            ?.trim('"', ' ')
+            ?.takeIf { it.isNotBlank() }
+        val email = profile.email?.takeIf { it.isNotBlank() } ?: user.email
+        val username = profile.username?.takeIf { it.isNotBlank() } ?: metaName
+        val fullName = profile.fullName?.takeIf { it.isNotBlank() } ?: metaFull
+        return profile.copy(email = email, username = username, fullName = fullName)
+    }
+
     suspend fun load(): Result<ProfileSnapshot> {
         return try {
             val user = supabase.auth.currentUserOrNull()
                 ?: return Result.failure(IllegalStateException("Not logged in"))
 
-            val profile = supabase.from("profiles")
+            val profileRow = supabase.from("profiles")
                 .select {
                     filter { eq("id", user.id) }
                     limit(1)
                 }
                 .decodeSingle<ProfileRow>()
 
-            val stats = supabase.from("user_stats")
-                .select {
-                    filter { eq("user_id", user.id) }
-                    limit(1)
-                }
-                .decodeSingle<UserStatsRow>()
+            val profile = mergeProfileWithAuthSession(profileRow, user)
+
+            val stats = UserStatsRow(
+                userId = user.id,
+                hostedCount = countAllHostedEvents(user.id),
+                attendedCount = countAllAcceptedInvites(user.id),
+                friendsCount = countAcceptedFriends(user.id)
+            )
 
             Result.success(ProfileSnapshot(profile = profile, stats = stats))
         } catch (e: Exception) {
@@ -215,11 +354,27 @@ class ProfileRepository {
                     .decodeList<SearchUserRow>()
             }.getOrElse { emptyList() }
 
-            val merged = (byUsername + byName + byEmail)
-                .distinctBy { it.id }
-                .take(40)
+            var merged = (byUsername + byName + byEmail).distinctBy { it.id }
 
-            Result.success(merged)
+            if (merged.isEmpty() && safe.isNotEmpty()) {
+                val broad = supabase.from("profiles")
+                    .select {
+                        filter { neq("id", user.id) }
+                        limit(200)
+                    }
+                    .decodeList<SearchUserRow>()
+                val needle = safe.lowercase()
+                merged = broad.filter { row ->
+                    listOf(row.username, row.fullName, row.email)
+                        .mapNotNull { it?.lowercase() }
+                        .joinToString(" ")
+                        .contains(needle)
+                }.take(40)
+            }
+
+            val demo = FindPeopleDemoDirectory.matches(safe)
+            val out = (merged + demo).distinctBy { it.id }.take(40)
+            Result.success(out)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -310,17 +465,7 @@ class ProfileRepository {
         return try {
             val user = supabase.auth.currentUserOrNull()
                 ?: return Result.failure(IllegalStateException("Not logged in"))
-            val now = OffsetDateTime.now()
-
-            val events = supabase.from("app_events")
-                .select {
-                    filter { eq("host_id", user.id) }
-                    order(column = "starts_at", order = io.github.jan.supabase.postgrest.query.Order.DESCENDING)
-                }
-                .decodeList<EventRow>()
-                .filter { event -> parseDateSafely(event.startsAt)?.isBefore(now) == true }
-
-            Result.success(events)
+            Result.success(pastHostedEventRows(user.id))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -330,30 +475,7 @@ class ProfileRepository {
         return try {
             val user = supabase.auth.currentUserOrNull()
                 ?: return Result.failure(IllegalStateException("Not logged in"))
-            val now = OffsetDateTime.now()
-
-            val attendeeRows = supabase.from("event_attendees")
-                .select {
-                    filter {
-                        eq("user_id", user.id)
-                        eq("status", "attending")
-                    }
-                }
-                .decodeList<EventAttendeeRow>()
-
-            val events = attendeeRows.mapNotNull { attendee ->
-                runCatching {
-                    supabase.from("app_events")
-                        .select {
-                            filter { eq("id", attendee.eventId) }
-                            limit(1)
-                        }
-                        .decodeSingle<EventRow>()
-                }.getOrNull()
-            }.filter { event -> parseDateSafely(event.startsAt)?.isBefore(now) == true }
-                .sortedByDescending { parseDateSafely(it.startsAt) }
-
-            Result.success(events)
+            Result.success(pastAcceptedAttendedEventRows(user.id))
         } catch (e: Exception) {
             Result.failure(e)
         }
