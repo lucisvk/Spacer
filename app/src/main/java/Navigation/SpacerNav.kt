@@ -2,6 +2,7 @@ package com.example.spacer.Navigation
 
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -61,7 +62,8 @@ fun SpacerAppScaffold(
         NavHost(
             navController = navController,
             startDestination = AppRoutes.Home,
-            // Keep bottom content tight so the bottom nav sits closer to the screen edge.
+            // Keep bottom content tight so the bottom nav sits closer to the screen edge as i find
+            // better ways to make this more convenient as kotlin does no have many options on automatic sizeing
             modifier = Modifier.padding(
                 start = innerPadding.calculateStartPadding(layoutDirection),
                 top = innerPadding.calculateTopPadding(),
@@ -89,6 +91,7 @@ private fun SpacerBottomBar(navController: NavHostController) {
     val currentDestination = navBackStackEntry?.destination
 
     NavigationBar(
+        modifier = Modifier.height(24.dp),
         containerColor = androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer,
         contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onPrimaryContainer
     ) {
@@ -119,7 +122,6 @@ private fun SpacerBottomBar(navController: NavHostController) {
                         }
                     )
                 },
-                // Using no label keeps the bottom bar height tight (prevents extra vertical spacing).
                 label = {}
             )
         }
