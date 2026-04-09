@@ -31,7 +31,7 @@
 *.war
 
 # =========================
-# NODE BACKEND (if in same repo)
+# NODE BACKEND 
 # =========================
 node_modules/
 .env
@@ -50,10 +50,3 @@ docker-compose.override.yml
 # =========================
 .DS_Store
 Thumbs.db
-
-# Assistant / IDE tooling (keep out of repo)
-.agents/
-.claude/
-.junie/
-.cursor/
-skills-lock.json
