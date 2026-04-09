@@ -1,7 +1,36 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     kotlin("plugin.serialization") version "2.0.21"
+}
+
+val localProperties = Properties().apply {
+    val localFile = rootProject.file("local.properties")
+    if (localFile.exists()) {
+        localFile.inputStream().use { load(it) }
+    }
+}
+
+fun localProp(name: String, fallback: String = ""): String {
+    return localProperties.getProperty(name, fallback)
+}
+
+fun secret(name: String): String {
+    // Resolution order:
+    // 1) local.properties
+    // 2) Gradle property (-P or gradle.properties)
+    // 3) environment variable
+    return localProp(name).ifBlank {
+        (findProperty(name) as? String).orEmpty().ifBlank {
+            System.getenv(name).orEmpty()
+        }
+    }
+}
+
+fun asBuildConfigString(value: String): String {
+    return "\"${value.replace("\"", "\\\"")}\""
 }
 
 android {
@@ -20,13 +49,32 @@ android {
         buildConfigField(
             "String",
             "SUPABASE_URL",
-            "\"https://kpnvdfgyoonvwhqorksm.supabase.co\""
+            asBuildConfigString(secret("SUPABASE_URL"))
         )
 
         buildConfigField(
             "String",
             "SUPABASE_KEY",
-            "\"sb_publishable_husrFNKx5v1JIEhMleZiaA_L8gA2oRf\""
+            asBuildConfigString(secret("SUPABASE_KEY"))
+        )
+
+        buildConfigField(
+            "String",
+            "GOOGLE_WEB_CLIENT_ID",
+            asBuildConfigString(secret("GOOGLE_WEB_CLIENT_ID"))
+        )
+
+        buildConfigField(
+            "String",
+            "DISCORD_CLIENT_ID",
+            asBuildConfigString(secret("DISCORD_CLIENT_ID"))
+        )
+
+        // Google Cloud: enable "Places API (New)" and restrict key to Android + Places.
+        buildConfigField(
+            "String",
+            "PLACES_API_KEY",
+            asBuildConfigString(secret("PLACES_API_KEY"))
         )
     }
 
@@ -55,10 +103,14 @@ dependencies {
     implementation(platform("io.github.jan-tennert.supabase:bom:3.2.6"))
     implementation("io.github.jan-tennert.supabase:auth-kt")
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:storage-kt")
     implementation("io.ktor:ktor-client-android:3.0.3")
+    implementation("io.ktor:ktor-client-content-negotiation:3.0.3")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -68,6 +120,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation("androidx.compose.material:material")
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.core.splashscreen)
 
