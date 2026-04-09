@@ -26,10 +26,17 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
+    primary = SpacerPurplePrimary,
+    onPrimary = SpacerPurpleOnPrimary,
+    secondary = Purple40,
+    tertiary = Pink40,
+    background = SpacerLightBackground,
+    surface = SpacerLightSurface,
+    surfaceVariant = SpacerLightSurfaceVariant,
+    outline = SpacerLightOutline,
+    onBackground = Color(0xFF1A1040),
+    onSurface = Color(0xFF1A1040),
+    onSurfaceVariant = Color(0xFF4A4268)
 )
 
 @Composable

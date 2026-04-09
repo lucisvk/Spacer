@@ -1,5 +1,27 @@
 -- Run once in Supabase → SQL Editor. Safe to re-run: drops policies before recreating.
 -- Requires: public.app_events(id uuid PK), auth.users.
+--
+-- RLS: policies that use EXISTS(app_events ↔ event_invites) recurse (each SELECT
+-- re-evaluates the other table’s policies). Use SECURITY DEFINER helpers so those
+-- checks bypass RLS inside the function body.
+
+-- Host check (reads app_events only inside definer context).
+create or replace function public.is_app_event_host(p_event_id uuid, p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.app_events e
+    where e.id = p_event_id and e.host_id = p_user_id
+  );
+$$;
+
+revoke all on function public.is_app_event_host(uuid, uuid) from public;
+grant execute on function public.is_app_event_host(uuid, uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- public.event_invites  (invitations for events)
@@ -17,6 +39,24 @@ create table if not exists public.event_invites (
 create index if not exists event_invites_invitee_idx on public.event_invites (invitee_id);
 create index if not exists event_invites_event_idx on public.event_invites (event_id);
 
+-- Invitee check (reads event_invites only inside definer context). Defined after table exists.
+create or replace function public.user_is_invited_to_event(p_event_id uuid, p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.event_invites i
+    where i.event_id = p_event_id and i.invitee_id = p_user_id
+  );
+$$;
+
+revoke all on function public.user_is_invited_to_event(uuid, uuid) from public;
+grant execute on function public.user_is_invited_to_event(uuid, uuid) to authenticated;
+
 alter table public.event_invites enable row level security;
 
 -- Grants (RLS still applies)
@@ -33,21 +73,11 @@ create policy "invites_select_invitee"
 
 create policy "invites_select_host"
   on public.event_invites for select to authenticated
-  using (
-    exists (
-      select 1 from public.app_events e
-      where e.id = event_invites.event_id and e.host_id = auth.uid()
-    )
-  );
+  using (public.is_app_event_host(event_invites.event_id, auth.uid()));
 
 create policy "invites_insert_host"
   on public.event_invites for insert to authenticated
-  with check (
-    exists (
-      select 1 from public.app_events e
-      where e.id = event_invites.event_id and e.host_id = auth.uid()
-    )
-  );
+  with check (public.is_app_event_host(event_invites.event_id, auth.uid()));
 
 create policy "invites_update_invitee"
   on public.event_invites for update to authenticated
@@ -84,12 +114,7 @@ create policy "availability_select_self"
 
 create policy "availability_select_host"
   on public.event_availability for select to authenticated
-  using (
-    exists (
-      select 1 from public.app_events e
-      where e.id = event_availability.event_id and e.host_id = auth.uid()
-    )
-  );
+  using (public.is_app_event_host(event_availability.event_id, auth.uid()));
 
 create policy "availability_upsert_self"
   on public.event_availability for insert to authenticated
@@ -106,9 +131,4 @@ create policy "availability_update_self"
 drop policy if exists "app_events_select_invited" on public.app_events;
 create policy "app_events_select_invited"
   on public.app_events for select to authenticated
-  using (
-    exists (
-      select 1 from public.event_invites i
-      where i.event_id = app_events.id and i.invitee_id = auth.uid()
-    )
-  );
+  using (public.user_is_invited_to_event(app_events.id, auth.uid()));

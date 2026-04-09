@@ -113,7 +113,7 @@ fun FindPeopleScreen(
 
         when {
             !queryReady && !loading -> Text(
-                "Results update as you type (at least 1 character).",
+                "Type to search profiles; sample people match “alex”, “sam”, or “river”.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
             )
@@ -129,14 +129,22 @@ fun FindPeopleScreen(
                         UserResultCard(
                             user = user,
                             onAddFriend = {
-                                scope.launch {
-                                    withContext(Dispatchers.IO) { repository.sendFriendRequest(user.id) }
-                                        .onSuccess {
-                                            Toast.makeText(context, "Friend request sent", Toast.LENGTH_SHORT).show()
-                                        }
-                                        .onFailure {
-                                            Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
-                                        }
+                                if (ProfileRepository.isOfflineDemoProfile(user.id)) {
+                                    Toast.makeText(
+                                        context,
+                                        "Sample profile — add real users in Supabase to send requests.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } else {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) { repository.sendFriendRequest(user.id) }
+                                            .onSuccess {
+                                                Toast.makeText(context, "Friend request sent", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .onFailure {
+                                                Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                                            }
+                                    }
                                 }
                             },
                             onBlock = {

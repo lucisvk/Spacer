@@ -38,17 +38,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
+import androidx.navigation.NavHostController
 import coil.compose.rememberAsyncImagePainter
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
+import com.example.spacer.Navigation.AppRoutes
+import com.example.spacer.network.SessionPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
 fun ProfileScreen(
+    navController: NavHostController,
     onOpenEditProfile: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenHostedEvents: () -> Unit,
@@ -56,9 +58,10 @@ fun ProfileScreen(
     onOpenFriends: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repository = remember { ProfileRepository() }
+    val sessionPrefs = remember { SessionPrefs(context) }
     val scrollState = rememberScrollState()
 
     var isLoading by remember { mutableStateOf(true) }
@@ -86,6 +89,10 @@ fun ProfileScreen(
                 hostedCount = snapshot.stats.hostedCount
                 attendedCount = snapshot.stats.attendedCount
                 friendsCount = snapshot.stats.friendsCount
+                val label = displayLabelFromProfile(snapshot.profile)
+                if (label.isNotBlank()) {
+                    sessionPrefs.saveProfileName(label)
+                }
             }
             .onFailure { e ->
                 loadError = e.message ?: "Failed to load profile"
@@ -95,14 +102,14 @@ fun ProfileScreen(
 
     LaunchedEffect(Unit) { loadProfile() }
 
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
+    DisposableEffect(navController) {
+        val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
+            if (destination.route == AppRoutes.Profile) {
                 scope.launch { loadProfile() }
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        navController.addOnDestinationChangedListener(listener)
+        onDispose { navController.removeOnDestinationChangedListener(listener) }
     }
 
     Column(
@@ -166,6 +173,7 @@ fun ProfileScreen(
                     email.trim().isNotEmpty() -> email.trim().substringBefore("@")
                     else -> ""
                 }
+                val accountLabel = email.trim().takeIf { it.isNotEmpty() }?.substringBefore("@")
                 // Second line only if they set a different display name (e.g. in Edit profile).
                 val subtitle = when {
                     isLoading -> ""
@@ -175,7 +183,11 @@ fun ProfileScreen(
                     else -> ""
                 }
                 Text(
-                    text = if (isLoading) "Loading..." else displayName.ifBlank { "Profile" },
+                    text = if (isLoading) {
+                        "Loading..."
+                    } else {
+                        displayName.ifBlank { accountLabel ?: "Account" }
+                    },
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
                 )
                 if (subtitle.isNotBlank()) {
