@@ -56,4 +56,8 @@ Thumbs.db
 .claude/
 .junie/
 .cursor/
+
+# Local Supabase SQL (keep private / out of git)
+database/
+
 skills-lock.json
