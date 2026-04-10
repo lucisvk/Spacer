@@ -66,6 +66,7 @@ fun EventsHubScreen(
     val scope = rememberCoroutineScope()
     val eventRepo = remember { EventRepository() }
     val placesRepo = remember { PlacesRepository() }
+    val notificationsRepo = remember { NotificationsRepository() }
 
     var pending by remember { mutableStateOf<List<PendingInviteUi>>(emptyList()) }
     var myEvents by remember { mutableStateOf<List<MyEventHubItem>>(emptyList()) }
@@ -107,6 +108,16 @@ fun EventsHubScreen(
                 val url = photoName?.let { placesRepo.photoMediaUrl(it, 350) }
                 if (url != null) eventId to url else null
             }.toMap()
+        }
+        val unread = withContext(Dispatchers.IO) { notificationsRepo.listUnread() }.getOrDefault(emptyList())
+        if (unread.isNotEmpty()) {
+            val summary = unread.joinToString("\n") { n -> "${n.title}: ${n.body}" }.take(800)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, summary, Toast.LENGTH_LONG).show()
+            }
+            withContext(Dispatchers.IO) {
+                unread.forEach { notificationsRepo.markRead(it.id) }
+            }
         }
         loading = false
     }
@@ -225,7 +236,7 @@ private fun InvitesHostingTab(
                                 Text(ev.title, fontWeight = FontWeight.SemiBold)
                                 RoleChip(isHosting = item.isHosting)
                             }
-                            Text(ev.startsAt, style = MaterialTheme.typography.bodySmall)
+                            Text(formatEventDateNoTime(ev.startsAt), style = MaterialTheme.typography.bodySmall)
                             ev.location?.takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall)
                             }
@@ -297,7 +308,7 @@ private fun InvitesHostingTab(
                                     )
                                 }
                             }
-                            Text(ev.startsAt, style = MaterialTheme.typography.bodySmall)
+                            Text(formatEventDateNoTime(ev.startsAt), style = MaterialTheme.typography.bodySmall)
                             ev.location?.takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall)
                             }
@@ -346,7 +357,7 @@ private fun InvitesHostingTab(
                         Column {
                             Text(inv.title, fontWeight = FontWeight.SemiBold)
                             Text("From ${inv.hostDisplayName}", style = MaterialTheme.typography.bodySmall)
-                            Text(inv.startsAt, style = MaterialTheme.typography.bodySmall)
+                            Text(formatEventDateNoTime(inv.startsAt), style = MaterialTheme.typography.bodySmall)
                             inv.location?.takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall)
                             }

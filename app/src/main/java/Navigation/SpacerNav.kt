@@ -131,7 +131,19 @@ fun SpacerAppScaffold(
                 startDestination = AppRoutes.Home,
                 modifier = Modifier.padding(innerPadding)
             ) {
-            composable(AppRoutes.Home) { HomeScreen() }
+            composable(AppRoutes.Home) {
+                HomeScreen(
+                    onViewAllEvents = {
+                        navController.navigate(AppRoutes.Events) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
             composable(AppRoutes.Events) {
                 val innerNav = rememberNavController()
                 NavHost(

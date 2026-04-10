@@ -2,10 +2,13 @@ package com.example.spacer.events
 
 import com.example.spacer.network.SupabaseManager
 import com.example.spacer.profile.EventRow
+import com.example.spacer.profile.ProfileRepository
 import com.example.spacer.profile.ProfileRow
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.rpc
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.OffsetDateTime
@@ -20,7 +23,14 @@ private data class AppEventInsert(
     @SerialName("host_id") val hostId: String,
     @SerialName("starts_at") val startsAt: String,
     @SerialName("ends_at") val endsAt: String? = null,
-    val location: String? = null
+    val location: String? = null,
+    val visibility: String = "public",
+    val category: String? = null
+)
+
+@Serializable
+private data class CancelHostedEventRpc(
+    @SerialName("p_event_id") val pEventId: String
 )
 
 @Serializable
@@ -87,6 +97,13 @@ data class MyEventHubItem(
     val isHosting: Boolean
 )
 
+/** [invitesSent] may be lower than requested when some IDs are not real auth users. */
+data class CreateEventOutcome(
+    val eventId: String,
+    val invitesRequested: Int,
+    val invitesSent: Int
+)
+
 class EventRepository {
     private val supabase = SupabaseManager.client
 
@@ -102,11 +119,16 @@ class EventRepository {
         startsAtIso: String,
         endsAtIso: String?,
         locationLabel: String?,
-        inviteeIds: List<String>
-    ): Result<String> {
+        inviteeIds: List<String>,
+        visibility: String = "public",
+        category: String? = null
+    ): Result<CreateEventOutcome> {
         return try {
             val user = supabase.auth.currentUserOrNull()
                 ?: return Result.failure(IllegalStateException("Not logged in"))
+            val vis = visibility.trim().lowercase().let { v ->
+                if (v == "invite_only") "invite_only" else "public"
+            }
             val eventId = UUID.randomUUID().toString()
             supabase.from("app_events").insert(
                 AppEventInsert(
@@ -116,22 +138,41 @@ class EventRepository {
                     hostId = user.id,
                     startsAt = startsAtIso,
                     endsAt = endsAtIso?.ifBlank { null },
-                    location = locationLabel?.ifBlank { null }
+                    location = locationLabel?.ifBlank { null },
+                    visibility = vis,
+                    category = category?.trim()?.ifBlank { null }
                 )
             )
-            val distinct = inviteeIds.distinct().filter { it != user.id }
+            // event_invites.invitee_id → auth.users(id). Offline demo profiles, typos, or stale
+            // search hits are not valid; insert each invite separately so one bad row does not fail the event.
+            val distinct = inviteeIds.distinct()
+                .filter { it != user.id }
+                .filterNot { ProfileRepository.isOfflineDemoProfile(it) }
+                .mapNotNull { id -> runCatching { UUID.fromString(id).toString() }.getOrNull() }
+            var invitesSent = 0
             distinct.forEach { inviteeId ->
-                supabase.from("event_invites").insert(
-                    EventInviteInsert(
-                        id = UUID.randomUUID().toString(),
-                        eventId = eventId,
-                        inviteeId = inviteeId,
-                        status = "pending"
+                val ok = runCatching {
+                    supabase.from("event_invites").insert(
+                        EventInviteInsert(
+                            id = UUID.randomUUID().toString(),
+                            eventId = eventId,
+                            inviteeId = inviteeId,
+                            status = "pending"
+                        )
                     )
-                )
+                }.isSuccess
+                if (ok) invitesSent++
             }
-            registerPublicEventListing(eventId)
-            Result.success(eventId)
+            if (vis == "public") {
+                registerPublicEventListing(eventId)
+            }
+            Result.success(
+                CreateEventOutcome(
+                    eventId = eventId,
+                    invitesRequested = distinct.size,
+                    invitesSent = invitesSent
+                )
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -141,6 +182,32 @@ class EventRepository {
     private suspend fun registerPublicEventListing(eventId: String) {
         runCatching {
             supabase.from("public_event_invites").insert(PublicListingInsert(eventId = eventId))
+        }
+    }
+
+    /**
+     * Cancels a hosted event, notifies invitees (via [user_notifications] when DB migration is applied),
+     * and deletes the event row (cascades invites).
+     */
+    suspend fun cancelHostedEvent(eventId: String): Result<Unit> {
+        return try {
+            supabase.postgrest.rpc("cancel_hosted_event", CancelHostedEventRpc(pEventId = eventId))
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Upcoming discoverable events for Home (public visibility only, soonest first). */
+    suspend fun listUpcomingDiscoverableEvents(limit: Int = 24): Result<List<EventRow>> {
+        return listPublicDiscoverableEvents().map { list ->
+            val now = OffsetDateTime.now()
+            list
+                .filter { e ->
+                    val d = parseDate(e.startsAt)
+                    d != null && d.isAfter(now)
+                }
+                .take(limit)
         }
     }
 
@@ -402,6 +469,7 @@ class EventRepository {
                 }.getOrNull()
             }
                 .filter { it.hostId != user.id }
+                .filter { it.visibility != "invite_only" }
                 .distinctBy { it.id }
                 .sortedBy { parseDate(it.startsAt) ?: OffsetDateTime.MAX }
             Result.success(events)
