@@ -11,6 +11,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +33,8 @@ import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -44,14 +48,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
+import com.example.spacer.events.EventCategories
+import com.example.spacer.events.EventRepository
+import com.example.spacer.events.formatEventDateNoTime
+import com.example.spacer.location.PlacesRepository
 import com.example.spacer.network.SessionPrefs
+import com.example.spacer.profile.EventRow
 import com.example.spacer.ui.theme.SpacerPurpleOutline
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -62,22 +73,49 @@ import kotlin.random.Random
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun HomeScreen(
+    onViewAllEvents: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val sessionPrefs = remember { SessionPrefs(context) }
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
+    val eventRepo = remember { EventRepository() }
+    val placesRepo = remember { PlacesRepository() }
 
     var userName by remember { mutableStateOf("User") }
     var locationLabel by remember { mutableStateOf("Not set") }
     var profileImageUri by remember { mutableStateOf<String?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
+    var upcomingEvents by remember { mutableStateOf<List<EventRow>>(emptyList()) }
+    var eventPhotoUrls by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
+    var homeEventsLoading by remember { mutableStateOf(true) }
+
+    suspend fun loadDiscoverable() {
+        homeEventsLoading = true
+        val list = withContext(Dispatchers.IO) { eventRepo.listUpcomingDiscoverableEvents(limit = 24) }
+            .getOrDefault(emptyList())
+        upcomingEvents = list
+        val locs = list.map { it.id to (it.location ?: "") }.filter { it.second.isNotBlank() }
+        eventPhotoUrls = withContext(Dispatchers.IO) {
+            locs.mapNotNull { (eventId, location) ->
+                val photoName = placesRepo.searchText(location)
+                    .getOrDefault(emptyList())
+                    .firstOrNull()
+                    ?.primaryPhotoName
+                val url = photoName?.let { placesRepo.photoMediaUrl(it, 350) }
+                if (url != null) eventId to url else null
+            }.toMap()
+        }
+        homeEventsLoading = false
+    }
 
     LaunchedEffect(Unit) {
         userName = sessionPrefs.getProfileName().ifBlank { "User" }
         locationLabel = sessionPrefs.getLocationLabel().ifBlank { "Not set" }
         profileImageUri = sessionPrefs.getProfileImageUri()
+        loadDiscoverable()
     }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -114,6 +152,7 @@ fun HomeScreen(
                     locationLabel = label
                     sessionPrefs.saveLocationLabel(label)
                 }
+                loadDiscoverable()
                 isRefreshing = false
             }
         }
@@ -173,52 +212,69 @@ fun HomeScreen(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            SectionHeader("Upcoming Events", "VIEW ALL")
+            SectionHeader("Upcoming Events", "VIEW ALL", onAction = onViewAllEvents)
             Spacer(modifier = Modifier.height(10.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(modifier = Modifier.weight(1f, fill = true)) {
-                    DummyEventCard(
-                        title = "K-Town Karaoke",
-                        date = "25 March, 2026",
-                        place = "K-Town, NY",
-                        onJoin = { sessionPrefs.incrementAttendedCount() }
-                    )
-                }
-                Box(modifier = Modifier.weight(1f, fill = true)) {
-                    DummyEventCard(
-                        title = "Friendsgivings 2026",
-                        date = "20 November, 2026",
-                        place = "New York, NY",
-                        onJoin = { sessionPrefs.incrementAttendedCount() }
-                    )
+            val tagOptions = remember(upcomingEvents) {
+                val fromDb = upcomingEvents.mapNotNull { it.category?.takeIf { c -> c.isNotBlank() } }.distinct()
+                if (fromDb.isEmpty()) EventCategories.all else fromDb.sorted()
+            }
+            val filtered = remember(upcomingEvents, selectedCategory) {
+                if (selectedCategory == null) upcomingEvents
+                else upcomingEvents.filter { it.category == selectedCategory }
+            }
+
+            if (homeEventsLoading) {
+                Text("Loading events…", style = MaterialTheme.typography.bodyMedium)
+            } else if (filtered.isEmpty()) {
+                Text(
+                    "No upcoming public events yet. Create one from Create or check the Events tab.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f)
+                )
+            } else {
+                val firstRow = filtered.take(2)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    firstRow.forEach { ev ->
+                        Box(modifier = Modifier.weight(1f, fill = true)) {
+                            DiscoverEventCard(
+                                event = ev,
+                                imageUrl = eventPhotoUrls[ev.id],
+                                onJoin = {
+                                    sessionPrefs.incrementAttendedCount()
+                                    onViewAllEvents()
+                                }
+                            )
+                        }
+                    }
+                    if (firstRow.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f, fill = true))
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(18.dp))
-            SectionHeader("Choose By Category", "VIEW ALL")
+            SectionHeader("Choose By Category", "VIEW ALL", onAction = onViewAllEvents)
             Spacer(modifier = Modifier.height(10.dp))
-            CategoryChipRow()
+            CategoryChipRow(
+                tags = tagOptions,
+                selected = selectedCategory,
+                onSelected = { selectedCategory = it }
+            )
             Spacer(modifier = Modifier.height(14.dp))
 
-            DummyCategoryRow(
-                title = "Library Study Group Session",
-                date = "12 April, 2026",
-                place = "New York Public Library, NY",
-                onJoin = { sessionPrefs.incrementAttendedCount() }
-            )
-            DummyCategoryRow(
-                title = "Exam Prep Study Session",
-                date = "20 April, 2026",
-                place = "New York Public Library, NY",
-                onJoin = { sessionPrefs.incrementAttendedCount() }
-            )
-            DummyCategoryRow(
-                title = "Study Session",
-                date = "30 April, 2026",
-                place = "New York Public Library, NY",
-                onJoin = { sessionPrefs.incrementAttendedCount() }
-            )
+            if (!homeEventsLoading && filtered.isNotEmpty()) {
+                filtered.drop(2).forEach { ev ->
+                    DiscoverCategoryRow(
+                        event = ev,
+                        imageUrl = eventPhotoUrls[ev.id],
+                        onJoin = {
+                            sessionPrefs.incrementAttendedCount()
+                            onViewAllEvents()
+                        }
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(24.dp))
         }
 
@@ -361,7 +417,7 @@ private fun SearchBarPlaceholder() {
 }
 
 @Composable
-private fun SectionHeader(title: String, action: String) {
+private fun SectionHeader(title: String, action: String, onAction: () -> Unit = {}) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(
             title,
@@ -371,45 +427,50 @@ private fun SectionHeader(title: String, action: String) {
         Text(
             action,
             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-            color = MaterialTheme.colorScheme.primary
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable { onAction() }
         )
     }
 }
 
 @Composable
-private fun CategoryChipRow() {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        SimpleChip("Studying")
-        SimpleChip("Adventure")
-        SimpleChip("Birthday")
-        SimpleChip("Potluck")
-    }
-}
-
-@Composable
-private fun SimpleChip(label: String) {
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+private fun CategoryChipRow(
+    tags: List<String>,
+    selected: String?,
+    onSelected: (String?) -> Unit
+) {
+    Row(
         modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Text(
-                label,
-                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface
+        val allSelected = selected == null
+        FilterChip(
+            selected = allSelected,
+            onClick = { onSelected(null) },
+            label = { Text("All") },
+            colors = FilterChipDefaults.filterChipColors()
+        )
+        tags.forEach { tag ->
+            val on = selected == tag
+            FilterChip(
+                selected = on,
+                onClick = { onSelected(if (on) null else tag) },
+                label = { Text(tag) },
+                colors = FilterChipDefaults.filterChipColors()
             )
         }
     }
 }
 
 @Composable
-private fun DummyEventCard(
-    title: String,
-    date: String,
-    place: String,
+private fun DiscoverEventCard(
+    event: EventRow,
+    imageUrl: String?,
     onJoin: () -> Unit
 ) {
+    val place = event.location?.takeIf { it.isNotBlank() } ?: "Location TBD"
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -422,16 +483,25 @@ private fun DummyEventCard(
                     .height(120.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
-            )
+            ) {
+                if (!imageUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = imageUrl,
+                        contentDescription = "Event image",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                title,
+                event.title,
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                date,
+                formatEventDateNoTime(event.startsAt),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -440,6 +510,14 @@ private fun DummyEventCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            event.category?.takeIf { it.isNotBlank() }?.let { cat ->
+                Text(
+                    cat,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
             Spacer(modifier = Modifier.height(10.dp))
             Button(onClick = onJoin, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
                 Text("JOIN NOW")
@@ -449,12 +527,12 @@ private fun DummyEventCard(
 }
 
 @Composable
-private fun DummyCategoryRow(
-    title: String,
-    date: String,
-    place: String,
+private fun DiscoverCategoryRow(
+    event: EventRow,
+    imageUrl: String?,
     onJoin: () -> Unit
 ) {
+    val place = event.location?.takeIf { it.isNotBlank() } ?: "Location TBD"
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -464,19 +542,28 @@ private fun DummyCategoryRow(
             Box(
                 modifier = Modifier
                     .size(44.dp)
-                    .clip(CircleShape)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-            )
+            ) {
+                if (!imageUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = imageUrl,
+                        contentDescription = "Event image",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    title,
+                    event.title,
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    date,
+                    formatEventDateNoTime(event.startsAt),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
