@@ -18,6 +18,8 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -37,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.spacer.events.EventCategories
 import com.example.spacer.events.EventRepository
 import com.example.spacer.profile.FriendListItem
 import com.example.spacer.profile.ProfileRepository
@@ -77,6 +80,8 @@ fun CreateEventDetailsScreen(
     var inviteSearchResults by remember { mutableStateOf<List<SearchUserRow>>(emptyList()) }
     var loadingInviteSearch by remember { mutableStateOf(false) }
     var publishing by remember { mutableStateOf(false) }
+    var visibilityPublic by remember { mutableStateOf(true) }
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         val fr = withContext(Dispatchers.IO) { profileRepository.getFriends() }
@@ -228,6 +233,60 @@ fun CreateEventDetailsScreen(
 
             item {
                 Text(
+                    "Who can discover this?",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = visibilityPublic,
+                        onClick = { visibilityPublic = true },
+                        label = { Text("Public") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                    FilterChip(
+                        selected = !visibilityPublic,
+                        onClick = { visibilityPublic = false },
+                        label = { Text("Friends / invites only") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                }
+                Text(
+                    "Public events appear on Home discovery and the public list. Invite-only stays with people you invite.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(top = 6.dp, bottom = 12.dp)
+                )
+                Text(
+                    "Category tag",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    EventCategories.all.forEach { cat ->
+                        val on = selectedCategory == cat
+                        FilterChip(
+                            selected = on,
+                            onClick = {
+                                selectedCategory = if (on) null else cat
+                            },
+                            label = { Text(cat) },
+                            colors = FilterChipDefaults.filterChipColors()
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            item {
+                Text(
                     "Invite people",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onBackground
@@ -251,7 +310,7 @@ fun CreateEventDetailsScreen(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        friends.forEach { f ->
+                        friends.filterNot { ProfileRepository.isOfflineDemoProfile(it.id) }.forEach { f ->
                             val on = f.id in invitedIds
                             AssistChip(
                                 onClick = {
@@ -287,7 +346,7 @@ fun CreateEventDetailsScreen(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-                inviteSearchResults.forEach { u ->
+                inviteSearchResults.filterNot { ProfileRepository.isOfflineDemoProfile(it.id) }.forEach { u ->
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -357,16 +416,24 @@ fun CreateEventDetailsScreen(
                                     startsAtIso = startIso,
                                     endsAtIso = endIso,
                                     locationLabel = loc,
-                                    inviteeIds = invitedIds.toList()
+                                    inviteeIds = invitedIds.toList(),
+                                    visibility = if (visibilityPublic) "public" else "invite_only",
+                                    category = selectedCategory
                                 )
                             }
                             publishing = false
-                            result.onSuccess {
-                                Toast.makeText(
-                                    context,
-                                    "Event created — invites sent",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                            result.onSuccess { outcome ->
+                                val msg = when {
+                                    outcome.invitesRequested == 0 ->
+                                        "Event created"
+                                    outcome.invitesSent == outcome.invitesRequested ->
+                                        "Event created — ${outcome.invitesSent} invite(s) sent"
+                                    outcome.invitesSent == 0 ->
+                                        "Event created — no invites sent. Each invitee must be a real Spacer account (same email sign-in as in Find people)."
+                                    else ->
+                                        "Event created — ${outcome.invitesSent} of ${outcome.invitesRequested} invite(s) sent; some accounts could not be invited."
+                                }
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                 onPublished()
                             }.onFailure {
                                 Toast.makeText(
