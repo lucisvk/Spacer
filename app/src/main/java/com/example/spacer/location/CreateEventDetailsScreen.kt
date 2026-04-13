@@ -438,7 +438,7 @@ fun CreateEventDetailsScreen(
                             }.onFailure {
                                 Toast.makeText(
                                     context,
-                                    it.message ?: "Could not create event",
+                                    "Couldn't create the event right now. Please try again.",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }

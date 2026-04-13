@@ -129,7 +129,7 @@ fun HostedEventsScreen(
                             }.onFailure {
                                 Toast.makeText(
                                     context,
-                                    it.message ?: "Could not cancel — check Supabase cancel_hosted_event migration",
+                                    "Couldn't cancel this event right now. Please try again in a moment.",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }

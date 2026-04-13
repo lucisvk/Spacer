@@ -82,13 +82,13 @@ fun EventsHubScreen(
             eventRepo.listPendingInvites()
         }.onSuccess { pending = it }
             .onFailure {
-                Toast.makeText(context, it.message ?: "Could not load invites", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "We couldn't load your invitations right now. Please try again.", Toast.LENGTH_LONG).show()
             }
         withContext(Dispatchers.IO) {
             eventRepo.listMyHostingAndAttendingEvents()
         }.onSuccess { myEvents = it }
             .onFailure {
-                Toast.makeText(context, it.message ?: "Could not load events", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "We couldn't load your events right now. Please try again.", Toast.LENGTH_LONG).show()
             }
         withContext(Dispatchers.IO) {
             eventRepo.listPublicDiscoverableEvents()
@@ -185,7 +185,7 @@ private fun InvitesHostingTab(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
             Text(
-                "Everything you’re hosting or attending, soonest first.",
+                "Newest first. Showing your latest 6.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
             )
@@ -202,7 +202,7 @@ private fun InvitesHostingTab(
                 )
             }
         } else {
-            items(myEvents, key = { it.event.id }) { item ->
+            items(myEvents.take(6), key = { it.event.id }) { item ->
                 val ev = item.event
                 Card(
                     modifier = Modifier
@@ -253,7 +253,7 @@ private fun InvitesHostingTab(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
             Text(
-                "Discoverable listings (run database/supabase_public_event_invites.sql in Supabase).",
+                "Newest public listings. Showing latest 6.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
             )
@@ -268,7 +268,7 @@ private fun InvitesHostingTab(
                 )
             }
         } else if (!loading) {
-            items(publicEvents, key = { it.id }) { ev ->
+            items(publicEvents.take(6), key = { it.id }) { ev ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()

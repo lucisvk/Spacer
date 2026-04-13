@@ -36,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -63,10 +64,10 @@ import com.example.spacer.events.formatEventDateNoTime
 import com.example.spacer.location.PlacesRepository
 import com.example.spacer.network.SessionPrefs
 import com.example.spacer.profile.EventRow
-import com.example.spacer.ui.theme.SpacerPurpleOutline
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.OffsetDateTime
 import java.util.Locale
 import kotlin.random.Random
 
@@ -90,12 +91,16 @@ fun HomeScreen(
     var upcomingEvents by remember { mutableStateOf<List<EventRow>>(emptyList()) }
     var eventPhotoUrls by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
     var homeEventsLoading by remember { mutableStateOf(true) }
 
     suspend fun loadDiscoverable() {
         homeEventsLoading = true
-        val list = withContext(Dispatchers.IO) { eventRepo.listUpcomingDiscoverableEvents(limit = 24) }
+        val list = withContext(Dispatchers.IO) { eventRepo.listHomeFeedEvents(limit = 36) }
             .getOrDefault(emptyList())
+            .filter { event ->
+                runCatching { OffsetDateTime.parse(event.startsAt) }.getOrNull()?.isAfter(OffsetDateTime.now()) == true
+            }
         upcomingEvents = list
         val locs = list.map { it.id to (it.location ?: "") }.filter { it.second.isNotBlank() }
         eventPhotoUrls = withContext(Dispatchers.IO) {
@@ -179,7 +184,10 @@ fun HomeScreen(
             )
 
             Spacer(modifier = Modifier.height(12.dp))
-            SearchBarPlaceholder()
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it }
+            )
             Spacer(modifier = Modifier.height(10.dp))
 
             Button(
@@ -223,17 +231,26 @@ fun HomeScreen(
                 if (selectedCategory == null) upcomingEvents
                 else upcomingEvents.filter { it.category == selectedCategory }
             }
+            val searched = remember(filtered, searchQuery) {
+                val q = searchQuery.trim().lowercase()
+                if (q.isBlank()) filtered
+                else filtered.filter { ev ->
+                    ev.title.lowercase().contains(q) ||
+                        (ev.location?.lowercase()?.contains(q) == true) ||
+                        (ev.category?.lowercase()?.contains(q) == true)
+                }
+            }
 
             if (homeEventsLoading) {
                 Text("Loading events…", style = MaterialTheme.typography.bodyMedium)
-            } else if (filtered.isEmpty()) {
+            } else if (searched.isEmpty()) {
                 Text(
-                    "No upcoming public events yet. Create one from Create or check the Events tab.",
+                    "No events match that search right now.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f)
                 )
             } else {
-                val firstRow = filtered.take(2)
+                val firstRow = searched.take(2)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     firstRow.forEach { ev ->
                         Box(modifier = Modifier.weight(1f, fill = true)) {
@@ -263,8 +280,8 @@ fun HomeScreen(
             )
             Spacer(modifier = Modifier.height(14.dp))
 
-            if (!homeEventsLoading && filtered.isNotEmpty()) {
-                filtered.drop(2).forEach { ev ->
+            if (!homeEventsLoading && searched.isNotEmpty()) {
+                searched.drop(2).forEach { ev ->
                     DiscoverCategoryRow(
                         event = ev,
                         imageUrl = eventPhotoUrls[ev.id],
@@ -390,29 +407,22 @@ private data class Star(
 )
 
 @Composable
-private fun SearchBarPlaceholder() {
+private fun SearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit
+) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
         shape = RoundedCornerShape(18.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "Find amazing events",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(SpacerPurpleOutline.copy(alpha = 0.35f))
-            )
-        }
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            placeholder = { Text("Search events by name, location, or tag") },
+            singleLine = true
+        )
     }
 }
 

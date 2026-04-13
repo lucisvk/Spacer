@@ -54,7 +54,7 @@ Thumbs.db
 # Assistant / IDE tooling (keep out of repo)
 .agents/
 .claude/
-.junie/
+.junie/f2
 .cursor/
 
 # Local Supabase SQL (keep private / out of git)

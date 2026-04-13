@@ -250,7 +250,7 @@ class EventRepository {
                     hostDisplayName = hostName
                 )
             }
-            Result.success(out.sortedBy { it.startsAt })
+            Result.success(out.sortedByDescending { parseDate(it.startsAt) ?: OffsetDateTime.MIN })
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -407,7 +407,7 @@ class EventRepository {
         }
     }
 
-    /** All events you host plus events you accepted (excluding host duplicates), soonest first. */
+    /** All events you host plus accepted invites (excluding host duplicates), newest first. */
     suspend fun listMyHostingAndAttendingEvents(): Result<List<MyEventHubItem>> {
         return try {
             val user = supabase.auth.currentUserOrNull()
@@ -416,7 +416,7 @@ class EventRepository {
             val hosted = supabase.from("app_events")
                 .select {
                     filter { eq("host_id", user.id) }
-                    order(column = "starts_at", order = Order.ASCENDING)
+                    order(column = "starts_at", order = Order.DESCENDING)
                 }
                 .decodeList<EventRow>()
 
@@ -443,7 +443,7 @@ class EventRepository {
 
             val items = hosted.map { MyEventHubItem(event = it, isHosting = true) } +
                 attendingOnly.map { MyEventHubItem(event = it, isHosting = false) }
-            val sorted = items.sortedBy { parseDate(it.event.startsAt) ?: OffsetDateTime.MAX }
+            val sorted = items.sortedByDescending { parseDate(it.event.startsAt) ?: OffsetDateTime.MIN }
             Result.success(sorted)
         } catch (e: Exception) {
             Result.failure(e)
@@ -471,8 +471,26 @@ class EventRepository {
                 .filter { it.hostId != user.id }
                 .filter { it.visibility != "invite_only" }
                 .distinctBy { it.id }
-                .sortedBy { parseDate(it.startsAt) ?: OffsetDateTime.MAX }
+                .sortedByDescending { parseDate(it.startsAt) ?: OffsetDateTime.MIN }
             Result.success(events)
+        } catch (_: Exception) {
+            Result.success(emptyList())
+        }
+    }
+
+    /** Home feed: your hosted/attending events + pending invites + public events, newest first. */
+    suspend fun listHomeFeedEvents(limit: Int = 24): Result<List<EventRow>> {
+        return try {
+            val myEvents = listMyHostingAndAttendingEvents().getOrDefault(emptyList()).map { it.event }
+            val pendingIds = listPendingInvites().getOrDefault(emptyList()).map { it.eventId }.distinct()
+            val pendingEvents = pendingIds.mapNotNull { id -> getEvent(id).getOrNull() }
+            val publicEvents = listPublicDiscoverableEvents().getOrDefault(emptyList())
+
+            val merged = (myEvents + pendingEvents + publicEvents)
+                .distinctBy { it.id }
+                .sortedByDescending { parseDate(it.startsAt) ?: OffsetDateTime.MIN }
+                .take(limit)
+            Result.success(merged)
         } catch (_: Exception) {
             Result.success(emptyList())
         }
