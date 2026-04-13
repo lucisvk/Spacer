@@ -2,6 +2,7 @@ package com.example.spacer.profile
 
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -17,11 +18,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,22 +39,181 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
+import com.example.spacer.events.EventRepository
+import com.example.spacer.events.formatEventDateNoTime
+import com.example.spacer.location.PlacesRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.OffsetDateTime
+import java.time.format.DateTimeParseException
 
 @Composable
 fun HostedEventsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    EventListScreen(
-        title = "Hosted Events",
-        onBack = onBack,
-        fetcher = { repo -> repo.getPastHostedEvents() },
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val profileRepo = remember { ProfileRepository() }
+    val eventRepo = remember { EventRepository() }
+    val placesRepo = remember { PlacesRepository() }
+
+    var loading by remember { mutableStateOf(true) }
+    var events by remember { mutableStateOf<List<EventRow>>(emptyList()) }
+    var photoUrls by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var cancelTarget by remember { mutableStateOf<EventRow?>(null) }
+    var cancelling by remember { mutableStateOf(false) }
+
+    suspend fun reload() {
+        loading = true
+        val result = withContext(Dispatchers.IO) { profileRepo.getAllHostedEvents() }
+        val loaded = result.fold(
+            onSuccess = { it },
+            onFailure = { e ->
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, e.message ?: "Failed to load events", Toast.LENGTH_LONG).show()
+                }
+                emptyList()
+            }
+        )
+        events = loaded
+        val locs = loaded.map { it.id to (it.location ?: "") }.filter { it.second.isNotBlank() }
+        photoUrls = withContext(Dispatchers.IO) {
+            locs.mapNotNull { (eventId, location) ->
+                val photoName = placesRepo.searchText(location)
+                    .getOrDefault(emptyList())
+                    .firstOrNull()
+                    ?.primaryPhotoName
+                val url = photoName?.let { placesRepo.photoMediaUrl(it, 350) }
+                if (url != null) eventId to url else null
+            }.toMap()
+        }
+        loading = false
+    }
+
+    LaunchedEffect(Unit) { reload() }
+
+    fun isUpcoming(startsAt: String): Boolean {
+        return try {
+            OffsetDateTime.parse(startsAt).isAfter(OffsetDateTime.now())
+        } catch (_: DateTimeParseException) {
+            false
+        }
+    }
+
+    cancelTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { cancelTarget = null },
+            title = { Text("Cancel event?") },
+            text = {
+                Text(
+                    "“${target.title}” will be removed and invitees will be notified (after you run the latest Supabase SQL migration).",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !cancelling,
+                    onClick = {
+                        cancelling = true
+                        scope.launch {
+                            val r = withContext(Dispatchers.IO) { eventRepo.cancelHostedEvent(target.id) }
+                            cancelling = false
+                            cancelTarget = null
+                            r.onSuccess {
+                                Toast.makeText(context, "Event cancelled", Toast.LENGTH_SHORT).show()
+                                reload()
+                            }.onFailure {
+                                Toast.makeText(
+                                    context,
+                                    it.message ?: "Could not cancel — check Supabase cancel_hosted_event migration",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                ) { Text("Cancel event") }
+            },
+            dismissButton = {
+                TextButton(onClick = { cancelTarget = null }, enabled = !cancelling) { Text("Keep") }
+            }
+        )
+    }
+
+    Column(
         modifier = modifier
-    )
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(16.dp)
+    ) {
+        Text("Hosted Events", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+        Spacer(modifier = Modifier.height(10.dp))
+        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
+        Spacer(modifier = Modifier.height(10.dp))
+
+        if (loading) {
+            Text("Loading...")
+        } else if (events.isEmpty()) {
+            Text("No hosted events yet.")
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                items(events, key = { it.id }) { event ->
+                    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, borderColor),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val url = photoUrls[event.id]
+                            if (!url.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = url,
+                                    contentDescription = "Event image",
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(RoundedCornerShape(10.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Spacer(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(event.title, style = MaterialTheme.typography.titleMedium)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    formatEventDateNoTime(event.startsAt),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                event.location?.takeIf { it.isNotBlank() }?.let {
+                                    Text(it, style = MaterialTheme.typography.bodySmall)
+                                }
+                                if (isUpcoming(event.startsAt)) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedButton(onClick = { cancelTarget = event }) {
+                                        Text("Cancel event")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -113,7 +275,7 @@ private fun EventListScreen(
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text(event.title, style = MaterialTheme.typography.titleMedium)
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(event.startsAt, style = MaterialTheme.typography.bodySmall)
+                            Text(formatEventDateNoTime(event.startsAt), style = MaterialTheme.typography.bodySmall)
                             event.location?.takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall)
                             }

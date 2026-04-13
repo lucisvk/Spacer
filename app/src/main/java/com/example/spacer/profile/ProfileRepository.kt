@@ -62,7 +62,10 @@ data class EventRow(
     val startsAt: String,
     @SerialName("ends_at")
     val endsAt: String? = null,
-    val location: String? = null
+    val location: String? = null,
+    /** [public] listed in discovery; [invite_only] friends / invited only. */
+    val visibility: String? = null,
+    val category: String? = null
 )
 
 @Serializable
@@ -175,6 +178,15 @@ class ProfileRepository {
             }
             .decodeList<EventRow>()
             .filter { event -> parseDateSafely(event.startsAt)?.isBefore(now) == true }
+    }
+
+    private suspend fun allHostedEventRows(hostUserId: String): List<EventRow> {
+        return supabase.from("app_events")
+            .select {
+                filter { eq("host_id", hostUserId) }
+                order(column = "starts_at", order = Order.DESCENDING)
+            }
+            .decodeList<EventRow>()
     }
 
     private suspend fun pastAcceptedAttendedEventRows(inviteeUserId: String): List<EventRow> {
@@ -466,6 +478,17 @@ class ProfileRepository {
             val user = supabase.auth.currentUserOrNull()
                 ?: return Result.failure(IllegalStateException("Not logged in"))
             Result.success(pastHostedEventRows(user.id))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Past and upcoming, newest first — used for profile hosted list with cancel on upcoming. */
+    suspend fun getAllHostedEvents(): Result<List<EventRow>> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            Result.success(allHostedEventRows(user.id))
         } catch (e: Exception) {
             Result.failure(e)
         }
