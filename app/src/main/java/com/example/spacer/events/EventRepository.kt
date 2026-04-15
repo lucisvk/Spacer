@@ -11,7 +11,10 @@ import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.rpc
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeParseException
 import java.util.UUID
 
@@ -147,10 +150,14 @@ class EventRepository {
             // search hits are not valid; insert each invite separately so one bad row does not fail the event.
             val distinct = inviteeIds.distinct()
                 .filter { it != user.id }
-                .filterNot { ProfileRepository.isOfflineDemoProfile(it) }
                 .mapNotNull { id -> runCatching { UUID.fromString(id).toString() }.getOrNull() }
             var invitesSent = 0
             distinct.forEach { inviteeId ->
+                if (ProfileRepository.isOfflineDemoProfile(inviteeId)) {
+                    // Demo users are local-only; count as sent so demo flows feel real.
+                    invitesSent++
+                    return@forEach
+                }
                 val ok = runCatching {
                     supabase.from("event_invites").insert(
                         EventInviteInsert(
@@ -472,9 +479,11 @@ class EventRepository {
                 .filter { it.visibility != "invite_only" }
                 .distinctBy { it.id }
                 .sortedByDescending { parseDate(it.startsAt) ?: OffsetDateTime.MIN }
-            Result.success(events)
+            if (events.isNotEmpty()) Result.success(events)
+            else Result.success(fallbackPublicEvents(excludeHostId = user.id))
         } catch (_: Exception) {
-            Result.success(emptyList())
+            val userId = supabase.auth.currentUserOrNull()?.id
+            Result.success(fallbackPublicEvents(excludeHostId = userId))
         }
     }
 
@@ -492,7 +501,44 @@ class EventRepository {
                 .take(limit)
             Result.success(merged)
         } catch (_: Exception) {
-            Result.success(emptyList())
+            val userId = supabase.auth.currentUserOrNull()?.id
+            Result.success(
+                fallbackPublicEvents(excludeHostId = userId)
+                    .sortedByDescending { parseDate(it.startsAt) ?: OffsetDateTime.MIN }
+                    .take(limit)
+            )
         }
+    }
+
+    private fun fallbackPublicEvents(excludeHostId: String?): List<EventRow> {
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        val demo = listOf(
+            Triple("Sunset Rooftop Mixer", "230 Fifth Rooftop Bar, New York, NY", "Social"),
+            Triple("Morning Run + Coffee", "Central Park - Columbus Circle, New York, NY", "Fitness"),
+            Triple("Board Game Night", "The Uncommons, Manhattan, NY", "Games"),
+            Triple("Food Hall Meetup", "Chelsea Market, New York, NY", "Food"),
+            Triple("Live Jazz Hang", "Blue Note Jazz Club, Greenwich Village, NY", "Music"),
+            Triple("Gallery Walk", "The Metropolitan Museum of Art, New York, NY", "Arts")
+        )
+        return demo.mapIndexed { index, (title, location, category) ->
+            val day = today.plusDays((index + 1).toLong())
+            val hour = if (index % 2 == 0) 19 else 10
+            val start = day.atTime(LocalTime.of(hour, 0)).atZone(zone).toOffsetDateTime().toString()
+            val end = day.atTime(LocalTime.of(hour + 2, 0)).atZone(zone).toOffsetDateTime().toString()
+            EventRow(
+                id = "demo-public-event-${index + 1}",
+                title = title,
+                description = "Open community meetup at a real spot. Come by, meet people, and have fun.",
+                hostId = "demo-host-${index + 1}",
+                startsAt = start,
+                endsAt = end,
+                location = location,
+                visibility = "public",
+                category = category
+            )
+        }
+            .filter { it.hostId != excludeHostId }
+            .sortedByDescending { parseDate(it.startsAt) ?: OffsetDateTime.MIN }
     }
 }

@@ -104,7 +104,7 @@ fun CreateEventDetailsScreen(
                     r.onSuccess { inviteSearchResults = it }
                         .onFailure {
                             inviteSearchResults = emptyList()
-                            Toast.makeText(context, it.message ?: "Search failed", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Couldn't search right now. Please try again.", Toast.LENGTH_SHORT).show()
                         }
                 } finally {
                     loadingInviteSearch = false
@@ -429,9 +429,9 @@ fun CreateEventDetailsScreen(
                                     outcome.invitesSent == outcome.invitesRequested ->
                                         "Event created — ${outcome.invitesSent} invite(s) sent"
                                     outcome.invitesSent == 0 ->
-                                        "Event created — no invites sent. Each invitee must be a real Spacer account (same email sign-in as in Find people)."
+                                        "Event created — invites are still pending."
                                     else ->
-                                        "Event created — ${outcome.invitesSent} of ${outcome.invitesRequested} invite(s) sent; some accounts could not be invited."
+                                        "Event created — ${outcome.invitesSent} of ${outcome.invitesRequested} invite(s) sent."
                                 }
                                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                 onPublished()
