@@ -46,6 +46,7 @@ import kotlinx.coroutines.withContext
 @OptIn(FlowPreview::class)
 @Composable
 fun FindPeopleScreen(
+    onOpenProfile: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -68,7 +69,7 @@ fun FindPeopleScreen(
                     result
                         .onSuccess { results = it }
                         .onFailure {
-                            Toast.makeText(context, it.message ?: "Search failed", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Couldn't search right now. Please try again.", Toast.LENGTH_LONG).show()
                             results = emptyList()
                         }
                 } finally {
@@ -128,22 +129,15 @@ fun FindPeopleScreen(
                     results.forEach { user ->
                         UserResultCard(
                             user = user,
+                            onViewProfile = { onOpenProfile(user.id) },
                             onAddFriend = {
-                                if (ProfileRepository.isOfflineDemoProfile(user.id)) {
-                                    Toast.makeText(
-                                        context,
-                                        "Sample profile — add real users in Supabase to send requests.",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                } else {
-                                    scope.launch {
-                                        withContext(Dispatchers.IO) { repository.sendFriendRequest(user.id) }
-                                            .onSuccess {
-                                                Toast.makeText(context, "Friend request sent", Toast.LENGTH_SHORT).show()
-                                            }
-                                            .onFailure {
-                                                Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
-                                            }
+                                scope.launch {
+                                    withContext(Dispatchers.IO) { repository.sendFriendRequest(user.id) }
+                                        .onSuccess {
+                                            Toast.makeText(context, "Friend request sent", Toast.LENGTH_SHORT).show()
+                                        }
+                                        .onFailure {
+                                            Toast.makeText(context, "Couldn't send request. Try again.", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             },
@@ -154,7 +148,7 @@ fun FindPeopleScreen(
                                             Toast.makeText(context, "User blocked", Toast.LENGTH_SHORT).show()
                                         }
                                         .onFailure {
-                                            Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Couldn't block right now. Try again.", Toast.LENGTH_SHORT).show()
                                         }
                                 }
                             },
@@ -165,7 +159,7 @@ fun FindPeopleScreen(
                                     }.onSuccess {
                                         Toast.makeText(context, "Report sent", Toast.LENGTH_SHORT).show()
                                     }.onFailure {
-                                        Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Couldn't send report. Try again.", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }
@@ -180,6 +174,7 @@ fun FindPeopleScreen(
 @Composable
 private fun UserResultCard(
     user: SearchUserRow,
+    onViewProfile: () -> Unit,
     onAddFriend: () -> Unit,
     onBlock: () -> Unit,
     onReport: () -> Unit
@@ -201,6 +196,7 @@ private fun UserResultCard(
             )
             Spacer(modifier = Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onViewProfile) { Text("View") }
                 OutlinedButton(onClick = onAddFriend) { Text("Add") }
                 OutlinedButton(onClick = onBlock) { Text("Block") }
                 OutlinedButton(onClick = onReport) { Text("Report") }

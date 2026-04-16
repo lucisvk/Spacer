@@ -59,6 +59,7 @@ fun EventsHubScreen(
     outerNav: NavHostController,
     onOpenInvite: (String) -> Unit,
     onOpenHostEvent: (String) -> Unit,
+    onOpenPublicProfile: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var tabIndex by remember { mutableIntStateOf(0) }
@@ -158,7 +159,10 @@ fun EventsHubScreen(
                 onOpenInvite = onOpenInvite,
                 onOpenHostEvent = onOpenHostEvent
             )
-            1 -> FindPeopleScreen(modifier = Modifier.fillMaxSize())
+            1 -> FindPeopleScreen(
+                onOpenProfile = onOpenPublicProfile,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }

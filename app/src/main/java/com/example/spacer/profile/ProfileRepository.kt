@@ -82,6 +82,17 @@ data class FriendListItem(
     val avatarUrl: String?
 )
 
+data class PublicProfileSnapshot(
+    val id: String,
+    val fullName: String,
+    val username: String,
+    val avatarUrl: String?,
+    val aboutMe: String,
+    val hostedEvents: List<EventRow>,
+    val attendedEvents: List<EventRow>,
+    val friends: List<FriendListItem>
+)
+
 @Serializable
 private data class FriendRequestInsert(
     @SerialName("sender_id")
@@ -154,11 +165,194 @@ private object FindPeopleDemoDirectory {
     fun isDemoId(id: String): Boolean = rows.any { it.id == id }
 }
 
+private object DemoProfileDetailsDirectory {
+    private data class DemoProfileDetails(
+        val id: String,
+        val fullName: String,
+        val username: String,
+        val aboutMe: String,
+        val hostedEvents: List<EventRow>,
+        val attendedEvents: List<EventRow>,
+        val friends: List<FriendListItem>
+    )
+
+    private fun eventDate(daysFromNow: Long, hour24: Int): String {
+        return OffsetDateTime.now()
+            .plusDays(daysFromNow)
+            .withHour(hour24)
+            .withMinute(0)
+            .withSecond(0)
+            .withNano(0)
+            .toString()
+    }
+
+    private val alexId = "11111111-1111-4111-8111-111111111101"
+    private val samId = "11111111-1111-4111-8111-111111111102"
+    private val riverId = "11111111-1111-4111-8111-111111111103"
+
+    private val rows: Map<String, DemoProfileDetails> = listOf(
+        DemoProfileDetails(
+            id = alexId,
+            fullName = "Alex Demo",
+            username = "alex_spacer",
+            aboutMe = "Coffee runs, rooftop hangs, and finding new spots around the city.",
+            hostedEvents = listOf(
+                EventRow(
+                    id = "demo-alex-host-1",
+                    title = "Sunset Rooftop Mixer",
+                    description = "Casual rooftop meetup with music and mocktails.",
+                    hostId = alexId,
+                    startsAt = eventDate(2, 19),
+                    endsAt = eventDate(2, 21),
+                    location = "230 Fifth Rooftop Bar, New York, NY",
+                    visibility = "public",
+                    category = "Social"
+                ),
+                EventRow(
+                    id = "demo-alex-host-2",
+                    title = "Sunday Brunch Club",
+                    description = "Easy brunch and a walk after.",
+                    hostId = alexId,
+                    startsAt = eventDate(-6, 11),
+                    endsAt = eventDate(-6, 13),
+                    location = "Buvette, West Village, New York, NY",
+                    visibility = "public",
+                    category = "Food"
+                )
+            ),
+            attendedEvents = listOf(
+                EventRow(
+                    id = "demo-alex-attend-1",
+                    title = "Board Game Night",
+                    hostId = samId,
+                    startsAt = eventDate(-3, 18),
+                    endsAt = eventDate(-3, 21),
+                    location = "The Uncommons, Manhattan, NY",
+                    visibility = "public",
+                    category = "Games"
+                ),
+                EventRow(
+                    id = "demo-alex-attend-2",
+                    title = "Live Jazz Hang",
+                    hostId = riverId,
+                    startsAt = eventDate(-12, 20),
+                    endsAt = eventDate(-12, 22),
+                    location = "Blue Note Jazz Club, Greenwich Village, NY",
+                    visibility = "public",
+                    category = "Music"
+                )
+            ),
+            friends = listOf(
+                FriendListItem(id = samId, fullName = "Sam Planner", username = "sam_planner", avatarUrl = null),
+                FriendListItem(id = riverId, fullName = "River Chen", username = "river_hosts", avatarUrl = null)
+            )
+        ),
+        DemoProfileDetails(
+            id = samId,
+            fullName = "Sam Planner",
+            username = "sam_planner",
+            aboutMe = "I organize chill group plans and game nights.",
+            hostedEvents = listOf(
+                EventRow(
+                    id = "demo-sam-host-1",
+                    title = "Board Game Night",
+                    description = "Beginner-friendly games and snacks.",
+                    hostId = samId,
+                    startsAt = eventDate(4, 18),
+                    endsAt = eventDate(4, 21),
+                    location = "The Uncommons, Manhattan, NY",
+                    visibility = "public",
+                    category = "Games"
+                )
+            ),
+            attendedEvents = listOf(
+                EventRow(
+                    id = "demo-sam-attend-1",
+                    title = "Morning Run + Coffee",
+                    hostId = riverId,
+                    startsAt = eventDate(-4, 9),
+                    endsAt = eventDate(-4, 11),
+                    location = "Central Park - Columbus Circle, New York, NY",
+                    visibility = "public",
+                    category = "Fitness"
+                )
+            ),
+            friends = listOf(
+                FriendListItem(id = alexId, fullName = "Alex Demo", username = "alex_spacer", avatarUrl = null),
+                FriendListItem(id = riverId, fullName = "River Chen", username = "river_hosts", avatarUrl = null)
+            )
+        ),
+        DemoProfileDetails(
+            id = riverId,
+            fullName = "River Chen",
+            username = "river_hosts",
+            aboutMe = "Always down for live music, art walks, and weekend activities.",
+            hostedEvents = listOf(
+                EventRow(
+                    id = "demo-river-host-1",
+                    title = "Live Jazz Hang",
+                    description = "Meetup before the show and table together.",
+                    hostId = riverId,
+                    startsAt = eventDate(3, 20),
+                    endsAt = eventDate(3, 22),
+                    location = "Blue Note Jazz Club, Greenwich Village, NY",
+                    visibility = "public",
+                    category = "Music"
+                ),
+                EventRow(
+                    id = "demo-river-host-2",
+                    title = "Gallery Walk",
+                    description = "Art walk through current exhibits.",
+                    hostId = riverId,
+                    startsAt = eventDate(7, 14),
+                    endsAt = eventDate(7, 17),
+                    location = "The Metropolitan Museum of Art, New York, NY",
+                    visibility = "public",
+                    category = "Arts"
+                )
+            ),
+            attendedEvents = listOf(
+                EventRow(
+                    id = "demo-river-attend-1",
+                    title = "Food Hall Meetup",
+                    hostId = alexId,
+                    startsAt = eventDate(-8, 13),
+                    endsAt = eventDate(-8, 15),
+                    location = "Chelsea Market, New York, NY",
+                    visibility = "public",
+                    category = "Food"
+                )
+            ),
+            friends = listOf(
+                FriendListItem(id = alexId, fullName = "Alex Demo", username = "alex_spacer", avatarUrl = null),
+                FriendListItem(id = samId, fullName = "Sam Planner", username = "sam_planner", avatarUrl = null)
+            )
+        )
+    ).associateBy { it.id }
+
+    fun isDemoId(id: String): Boolean = rows.containsKey(id)
+
+    fun profileFor(id: String): PublicProfileSnapshot? {
+        val row = rows[id] ?: return null
+        return PublicProfileSnapshot(
+            id = row.id,
+            fullName = row.fullName,
+            username = row.username,
+            avatarUrl = null,
+            aboutMe = row.aboutMe,
+            hostedEvents = row.hostedEvents.sortedByDescending { it.startsAt },
+            attendedEvents = row.attendedEvents.sortedByDescending { it.startsAt },
+            friends = row.friends
+        )
+    }
+}
+
 class ProfileRepository {
     private val supabase = SupabaseManager.client
 
     companion object {
-        fun isOfflineDemoProfile(id: String): Boolean = FindPeopleDemoDirectory.isDemoId(id)
+        fun isOfflineDemoProfile(id: String): Boolean =
+            FindPeopleDemoDirectory.isDemoId(id) || DemoProfileDetailsDirectory.isDemoId(id)
     }
 
     private fun parseDateSafely(value: String): OffsetDateTime? {
@@ -399,6 +593,9 @@ class ProfileRepository {
             if (targetUserId == user.id) {
                 return Result.failure(IllegalArgumentException("You can't add yourself"))
             }
+            if (isOfflineDemoProfile(targetUserId)) {
+                return Result.success(Unit)
+            }
 
             supabase.from("friend_requests").insert(
                 FriendRequestInsert(
@@ -418,6 +615,9 @@ class ProfileRepository {
                 ?: return Result.failure(IllegalStateException("Not logged in"))
             if (targetUserId == user.id) {
                 return Result.failure(IllegalArgumentException("You can't block yourself"))
+            }
+            if (isOfflineDemoProfile(targetUserId)) {
+                return Result.success(Unit)
             }
 
             supabase.from("user_blocks").insert(
@@ -442,6 +642,9 @@ class ProfileRepository {
             }
             if (targetUserId == user.id) {
                 return Result.failure(IllegalArgumentException("You can't report yourself"))
+            }
+            if (isOfflineDemoProfile(targetUserId)) {
+                return Result.success(Unit)
             }
 
             supabase.from("user_reports").insert(
@@ -548,6 +751,107 @@ class ProfileRepository {
             }.sortedBy { it.fullName.lowercase() }
 
             Result.success(friends)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getPublicProfile(userId: String): Result<PublicProfileSnapshot> {
+        return try {
+            DemoProfileDetailsDirectory.profileFor(userId)?.let { demo ->
+                return Result.success(demo)
+            }
+
+            val p = supabase.from("profiles")
+                .select {
+                    filter { eq("id", userId) }
+                    limit(1)
+                }
+                .decodeSingle<ProfileRow>()
+
+            val hosted = supabase.from("app_events")
+                .select {
+                    filter { eq("host_id", userId) }
+                    order(column = "starts_at", order = Order.DESCENDING)
+                    limit(8)
+                }
+                .decodeList<EventRow>()
+
+            val invites = runCatching {
+                supabase.from("event_invites")
+                    .select {
+                        filter {
+                            eq("invitee_id", userId)
+                            eq("status", "accepted")
+                        }
+                        limit(20)
+                    }
+                    .decodeList<EventInviteAcceptedRow>()
+            }.getOrDefault(emptyList())
+
+            val attended = invites.mapNotNull { inv ->
+                runCatching {
+                    supabase.from("app_events")
+                        .select {
+                            filter { eq("id", inv.eventId) }
+                            limit(1)
+                        }
+                        .decodeSingle<EventRow>()
+                }.getOrNull()
+            }.sortedByDescending { it.startsAt }
+
+            val outgoing = runCatching {
+                supabase.from("friend_requests")
+                    .select {
+                        filter {
+                            eq("sender_id", userId)
+                            eq("status", "accepted")
+                        }
+                    }
+                    .decodeList<FriendRequestInsert>()
+                    .map { it.receiverId }
+            }.getOrDefault(emptyList())
+            val incoming = runCatching {
+                supabase.from("friend_requests")
+                    .select {
+                        filter {
+                            eq("receiver_id", userId)
+                            eq("status", "accepted")
+                        }
+                    }
+                    .decodeList<FriendRequestInsert>()
+                    .map { it.senderId }
+            }.getOrDefault(emptyList())
+
+            val friends = (outgoing + incoming).distinct().mapNotNull { id ->
+                runCatching {
+                    val f = supabase.from("profiles")
+                        .select {
+                            filter { eq("id", id) }
+                            limit(1)
+                        }
+                        .decodeSingle<ProfileRow>()
+                    FriendListItem(
+                        id = f.id,
+                        fullName = f.fullName?.ifBlank { f.username ?: "User" } ?: (f.username ?: "User"),
+                        username = f.username ?: "user",
+                        avatarUrl = f.avatarUrl
+                    )
+                }.getOrNull()
+            }.sortedBy { it.fullName.lowercase() }
+
+            Result.success(
+                PublicProfileSnapshot(
+                    id = p.id,
+                    fullName = p.fullName?.ifBlank { p.username ?: "User" } ?: (p.username ?: "User"),
+                    username = p.username ?: "user",
+                    avatarUrl = p.avatarUrl,
+                    aboutMe = p.aboutMe?.ifBlank { "No bio yet." } ?: "No bio yet.",
+                    hostedEvents = hosted,
+                    attendedEvents = attended,
+                    friends = friends
+                )
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }

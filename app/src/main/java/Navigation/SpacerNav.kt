@@ -53,6 +53,7 @@ import com.example.spacer.network.AuthRepository
 import com.example.spacer.network.SessionPrefs
 import com.example.spacer.profile.FriendsScreen
 import com.example.spacer.profile.HostedEventsScreen
+import com.example.spacer.profile.PublicProfileScreen
 import com.example.spacer.profile.ProfileRepository
 import com.example.spacer.profile.SettingsScreen
 import com.example.spacer.profile.displayLabelFromProfile
@@ -156,7 +157,10 @@ fun SpacerAppScaffold(
                             innerEventsNav = innerNav,
                             outerNav = navController,
                             onOpenInvite = { innerNav.navigate("invite/${it}") },
-                            onOpenHostEvent = { innerNav.navigate("host/${it}") }
+                            onOpenHostEvent = { innerNav.navigate("host/${it}") },
+                            onOpenPublicProfile = { userId ->
+                                innerNav.navigate("public_profile/${Uri.encode(userId)}")
+                            }
                         )
                     }
                     composable(
@@ -180,6 +184,16 @@ fun SpacerAppScaffold(
                         val id = entry.arguments?.getString("eventId").orEmpty()
                         HostEventDetailScreen(
                             eventId = id,
+                            onBack = { innerNav.popBackStack() }
+                        )
+                    }
+                    composable(
+                        route = "public_profile/{userId}",
+                        arguments = listOf(navArgument("userId") { type = NavType.StringType })
+                    ) { entry ->
+                        val userId = Uri.decode(entry.arguments?.getString("userId").orEmpty())
+                        PublicProfileScreen(
+                            userId = userId,
                             onBack = { innerNav.popBackStack() }
                         )
                     }
