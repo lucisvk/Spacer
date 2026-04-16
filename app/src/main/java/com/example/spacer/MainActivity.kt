@@ -395,7 +395,7 @@ private fun LoginScreen(
                                 .onFailure { error ->
                                     Toast.makeText(
                                         context,
-                                        "Login failed: ${error.message}",
+                                        error.message ?: "Couldn't log in right now. Please try again.",
                                         Toast.LENGTH_LONG
                                     ).show()
                                 }
@@ -434,7 +434,7 @@ private fun LoginScreen(
                             result.onFailure { e ->
                                 Toast.makeText(
                                     context,
-                                    e.message ?: "Google sign-in failed",
+                                    e.message ?: "Couldn't start Google sign-in. Please try again.",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -471,7 +471,7 @@ private fun LoginScreen(
                             result.onFailure { e ->
                                 Toast.makeText(
                                     context,
-                                    e.message ?: "Discord sign-in failed",
+                                    e.message ?: "Couldn't start Discord sign-in. Please try again.",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -508,7 +508,7 @@ private fun LoginScreen(
                             result.onFailure { e ->
                                 Toast.makeText(
                                     context,
-                                    e.message ?: "GitHub sign-in failed",
+                                    e.message ?: "Couldn't start GitHub sign-in. Please try again.",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -684,7 +684,7 @@ private fun CreateAccountScreen(
                             .onFailure { error ->
                                 Toast.makeText(
                                     context,
-                                    "ERROR: ${error.message}",
+                                    error.message ?: "Couldn't create your account right now. Please try again.",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -749,7 +749,7 @@ private fun ForgotPasswordScreen(
             onClick = {
                 Toast.makeText(
                     context,
-                    "Forgot password endpoint not added yet",
+                    "Password reset is coming soon.",
                     Toast.LENGTH_SHORT
                 ).show()
             },

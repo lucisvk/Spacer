@@ -72,7 +72,7 @@ fun InviteEventScreen(
         val ev = withContext(Dispatchers.IO) { repo.getEvent(eventId).getOrNull() }
         event = ev
         if (ev == null) {
-            Toast.makeText(context, "Failed to load event", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Couldn't load this event right now.", Toast.LENGTH_LONG).show()
         }
         val status = withContext(Dispatchers.IO) { repo.getInviteStatusForEvent(eventId).getOrNull() }
         inviteStatus = status
@@ -108,7 +108,7 @@ fun InviteEventScreen(
                 onCalendarClick = {
                     val startMillis = parseStartMillis(event!!.startsAt, event!!.endsAt)
                     if (startMillis == null) {
-                        Toast.makeText(context, "Could not parse event time for calendar.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Couldn't add this to calendar right now.", Toast.LENGTH_SHORT).show()
                     } else {
                         val endMillis = parseEndMillis(event!!.startsAt, event!!.endsAt) ?: (startMillis + 60 * 60 * 1000)
                         val intent = Intent(Intent.ACTION_INSERT).apply {
@@ -131,7 +131,7 @@ fun InviteEventScreen(
                             inviteStatus = "accepted"
                             Toast.makeText(context, "Accepted", Toast.LENGTH_SHORT).show()
                         }.onFailure {
-                            Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Couldn't accept right now. Try again.", Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
@@ -142,7 +142,7 @@ fun InviteEventScreen(
                             Toast.makeText(context, "Declined", Toast.LENGTH_SHORT).show()
                             onBack()
                         }.onFailure {
-                            Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Couldn't decline right now. Try again.", Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
@@ -154,7 +154,7 @@ fun InviteEventScreen(
                         r.onSuccess {
                             Toast.makeText(context, "Availability saved", Toast.LENGTH_SHORT).show()
                         }.onFailure {
-                            Toast.makeText(context, it.message ?: "Failed to save", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Couldn't save right now. Please try again.", Toast.LENGTH_LONG).show()
                         }
                     }
                 },
