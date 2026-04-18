@@ -1,7 +1,17 @@
 package com.example.spacer.profile
 
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,9 +20,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -20,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,19 +45,34 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
+import androidx.core.content.PermissionChecker
+import com.example.spacer.calendar.DeviceCalendarBusyChecker
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import coil.compose.rememberAsyncImagePainter
+import com.example.spacer.events.NotificationsRepository
+import com.example.spacer.events.UserNotificationDispatcher
 import com.example.spacer.network.SessionPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private enum class CalendarPermissionPending {
+    None,
+    DeviceRead,
+    ConflictNotify
+}
+
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun SettingsScreen(
     isDarkTheme: Boolean,
     onToggleTheme: () -> Unit,
     onLogout: () -> Unit,
+    onOpenBlockedUsers: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -58,11 +89,72 @@ fun SettingsScreen(
     var calendarConflictNotify by remember {
         mutableStateOf(sessionPrefs.isCalendarConflictNotificationsEnabled())
     }
+    var deviceCalendarRead by remember {
+        mutableStateOf(sessionPrefs.isDeviceCalendarReadEnabled())
+    }
+    var pendingCalPermission by remember { mutableStateOf(CalendarPermissionPending.None) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val profileImageUri = remember { sessionPrefs.getProfileImageUri() }
+    val presence = remember { PresenceStatus.fromDb(sessionPrefs.getPresenceStatus()) }
+    val notificationsRepo = remember { NotificationsRepository() }
 
-    Column(
+    val readCalendarLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        when (pendingCalPermission) {
+            CalendarPermissionPending.DeviceRead -> {
+                if (granted) {
+                    sessionPrefs.setDeviceCalendarReadEnabled(true)
+                    deviceCalendarRead = true
+                } else {
+                    sessionPrefs.setDeviceCalendarReadEnabled(false)
+                    deviceCalendarRead = false
+                    Toast.makeText(
+                        context,
+                        "Calendar permission is required to read busy times on this device.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            CalendarPermissionPending.ConflictNotify -> {
+                if (granted) {
+                    sessionPrefs.setCalendarConflictNotificationsEnabled(true)
+                    calendarConflictNotify = true
+                } else {
+                    Toast.makeText(
+                        context,
+                        "Calendar permission is required for conflict notifications.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            CalendarPermissionPending.None -> Unit
+        }
+        pendingCalPermission = CalendarPermissionPending.None
+    }
+
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = isRefreshing,
+        onRefresh = {
+            scope.launch {
+                isRefreshing = true
+                calendarSharingEnabled = sessionPrefs.isCalendarAvailabilitySharingEnabled()
+                calendarConflictNotify = sessionPrefs.isCalendarConflictNotificationsEnabled()
+                deviceCalendarRead = sessionPrefs.isDeviceCalendarReadEnabled()
+                isRefreshing = false
+            }
+        }
+    )
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .pullRefresh(pullRefreshState)
+    ) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
             .verticalScroll(scrollState)
             .padding(16.dp),
         verticalArrangement = Arrangement.Top
@@ -72,23 +164,83 @@ fun SettingsScreen(
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
         )
         Spacer(modifier = Modifier.height(14.dp))
-
         Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                Box(modifier = Modifier.size(52.dp)) {
+                    if (profileImageUri.isNullOrBlank()) {
+                        Spacer(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, androidx.compose.foundation.shape.CircleShape)
+                        )
+                    } else {
+                        Image(
+                            painter = rememberAsyncImagePainter(model = Uri.parse(profileImageUri)),
+                            contentDescription = "Profile picture",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, androidx.compose.foundation.shape.CircleShape)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .align(androidx.compose.ui.Alignment.BottomEnd)
+                            .size(14.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(presence.dotColor)
+                            .border(1.dp, MaterialTheme.colorScheme.surface, androidx.compose.foundation.shape.CircleShape)
+                    )
+                }
+                Column {
+                    Text(sessionPrefs.getProfileName().ifBlank { "User" }, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        presence.label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Text(
+            "APPEARANCE",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    text = "Appearance",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
                 androidx.compose.foundation.layout.Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(if (isDarkTheme) "Dark mode enabled" else "Light mode enabled")
+                    Column {
+                        Text("Light mode")
+                        Text(
+                            if (isDarkTheme) "Currently disabled" else "Currently enabled",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
                     Switch(checked = isDarkTheme, onCheckedChange = { onToggleTheme() })
                 }
             }
@@ -96,17 +248,75 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
+        Text(
+            "NOTIFICATIONS",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
         Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val enabled = PermissionChecker.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PermissionChecker.PERMISSION_GRANTED
+                Text(
+                    text = if (enabled) {
+                        "Phone notifications: enabled"
+                    } else {
+                        "Phone notifications: disabled (grant in system settings)"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                val d = withContext(Dispatchers.IO) {
+                                    UserNotificationDispatcher.flushUnreadToPhoneWithDiagnostics(context, notificationsRepo)
+                                }
+                                Toast.makeText(
+                                    context,
+                                    "Unread=${d.unreadCount}, delivered=${d.deliveredCount}, failed=${d.failureCount}" +
+                                        (d.firstError?.let { " ($it)" } ?: ""),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Sync now") }
+                }
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        }
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Open notification settings") }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Text(
+            "CALENDAR & AVAILABILITY",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    text = "Calendar & availability",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "Let hosts see when you’re generally free on invites, and optionally warn you if a time clashes with your calendar.",
                     style = MaterialTheme.typography.bodySmall,
@@ -142,6 +352,57 @@ fun SettingsScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f, fill = true).padding(end = 8.dp)) {
+                        Text(
+                            text = "Read calendar busy times",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = when {
+                                !deviceCalendarRead ->
+                                    "Off — Spacer won’t read Google / Apple calendars on this phone for overlaps."
+                                PermissionChecker.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.READ_CALENDAR
+                                ) != PermissionChecker.PERMISSION_GRANTED ->
+                                    "Turned on in Spacer — allow Calendar access in system settings to finish setup."
+                                else ->
+                                    "On — Spacer can compare invites to busy times on this device (read‑only)."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    Switch(
+                        checked = deviceCalendarRead,
+                        onCheckedChange = { on ->
+                            if (on) {
+                                val hasPerm = DeviceCalendarBusyChecker.hasReadCalendarPermission(context)
+                                if (hasPerm) {
+                                    sessionPrefs.setDeviceCalendarReadEnabled(true)
+                                    deviceCalendarRead = true
+                                } else {
+                                    pendingCalPermission = CalendarPermissionPending.DeviceRead
+                                    readCalendarLauncher.launch(Manifest.permission.READ_CALENDAR)
+                                }
+                            } else {
+                                sessionPrefs.setDeviceCalendarReadEnabled(false)
+                                deviceCalendarRead = false
+                                calendarConflictNotify = sessionPrefs.isCalendarConflictNotificationsEnabled()
+                            }
+                        }
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -152,7 +413,7 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text(
-                            text = "Coming soon: alert when an invite overlaps busy calendar time.",
+                            text = "Notify when a pending invite overlaps busy time on this device’s calendar.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                             modifier = Modifier.padding(top = 4.dp)
@@ -160,8 +421,13 @@ fun SettingsScreen(
                     }
                     Switch(
                         checked = calendarConflictNotify,
-                        enabled = calendarSharingEnabled,
+                        enabled = calendarSharingEnabled && deviceCalendarRead,
                         onCheckedChange = { on ->
+                            if (on && !DeviceCalendarBusyChecker.hasReadCalendarPermission(context)) {
+                                pendingCalPermission = CalendarPermissionPending.ConflictNotify
+                                readCalendarLauncher.launch(Manifest.permission.READ_CALENDAR)
+                                return@Switch
+                            }
                             calendarConflictNotify = on
                             sessionPrefs.setCalendarConflictNotificationsEnabled(on)
                         }
@@ -171,12 +437,24 @@ fun SettingsScreen(
         }
 
         Spacer(modifier = Modifier.height(14.dp))
-        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-            Text("Back to profile")
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
-            Text("Log out")
+        Text(
+            "ACCOUNT",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                SettingsNavRow("See blocked users", onOpenBlockedUsers)
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
+                SettingsNavRow("Back to profile", onBack)
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
+                SettingsNavRow("Log out", onLogout)
+            }
         }
         Spacer(modifier = Modifier.height(8.dp))
         Button(
@@ -186,6 +464,12 @@ fun SettingsScreen(
         ) {
             Text("Delete account")
         }
+    }
+    PullRefreshIndicator(
+        refreshing = isRefreshing,
+        state = pullRefreshState,
+        modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter)
+    )
     }
 
     if (showDeleteDialog) {
@@ -231,6 +515,23 @@ fun SettingsScreen(
                 OutlinedButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
             }
         )
+    }
+}
+
+@Composable
+private fun SettingsNavRow(
+    title: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(title)
+        Text("›", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
     }
 }
 
