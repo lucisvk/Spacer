@@ -64,7 +64,15 @@ fun EditProfileScreen(
     var email by remember { mutableStateOf("") }
     var avatarUrl by remember { mutableStateOf<String?>(null) }
 
+    fun loadFromCache() {
+        val cachedName = sessionPrefs.getProfileName().trim()
+        if (fullName.isBlank()) fullName = cachedName
+        if (aboutMe.isBlank()) aboutMe = sessionPrefs.getAboutMe()
+        if (avatarUrl.isNullOrBlank()) avatarUrl = sessionPrefs.getProfileImageUri()
+    }
+
     LaunchedEffect(Unit) {
+        loadFromCache()
         loading = true
         withContext(Dispatchers.IO) { repository.load() }
             .onSuccess {
@@ -76,6 +84,7 @@ fun EditProfileScreen(
             }
             .onFailure {
                 Toast.makeText(context, it.message ?: "Failed to load profile", Toast.LENGTH_LONG).show()
+                loadFromCache()
             }
         loading = false
     }
@@ -84,6 +93,7 @@ fun EditProfileScreen(
         contract = ActivityResultContracts.GetContent()
     ) { selectedUri ->
         avatarUrl = selectedUri?.toString()
+        sessionPrefs.saveProfileImageUri(avatarUrl)
     }
 
     Column(
@@ -181,6 +191,8 @@ fun EditProfileScreen(
                         if (label.isNotBlank()) {
                             sessionPrefs.saveProfileName(label)
                         }
+                        sessionPrefs.saveAboutMe(aboutMe.trim())
+                        sessionPrefs.saveProfileImageUri(avatarUrl)
                         Toast.makeText(context, "Profile saved", Toast.LENGTH_SHORT).show()
                         onBack()
                     }.onFailure {

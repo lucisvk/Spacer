@@ -21,6 +21,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,9 +29,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
+import androidx.navigation.NavHostController
+import com.example.spacer.network.SessionPrefs
 import com.example.spacer.network.SupabaseManager
 import com.example.spacer.profile.EventRow
 import io.github.jan.supabase.auth.auth
@@ -53,9 +58,12 @@ private val presetOptions = listOf(
 fun InviteEventScreen(
     eventId: String,
     onBack: () -> Unit,
+    onOpenCalendarSettings: () -> Unit = {},
+    outerNavController: NavHostController? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val sessionPrefs = remember { SessionPrefs(context) }
     val scope = rememberCoroutineScope()
     val repo = remember { EventRepository() }
 
@@ -65,10 +73,21 @@ fun InviteEventScreen(
     var publicListingOnly by remember { mutableStateOf(false) }
     var selectedPresets by remember { mutableStateOf(setOf<String>()) }
     var notes by remember { mutableStateOf("") }
+    var calendarSharingEnabled by remember { mutableStateOf(sessionPrefs.isCalendarAvailabilitySharingEnabled()) }
+
+    DisposableEffect(outerNavController) {
+        val outer = outerNavController ?: return@DisposableEffect onDispose { }
+        val listener = NavController.OnDestinationChangedListener { _, _, _ ->
+            calendarSharingEnabled = sessionPrefs.isCalendarAvailabilitySharingEnabled()
+        }
+        outer.addOnDestinationChangedListener(listener)
+        onDispose { outer.removeOnDestinationChangedListener(listener) }
+    }
 
     LaunchedEffect(eventId) {
         loading = true
         publicListingOnly = false
+        calendarSharingEnabled = sessionPrefs.isCalendarAvailabilitySharingEnabled()
         val ev = withContext(Dispatchers.IO) { repo.getEvent(eventId).getOrNull() }
         event = ev
         if (ev == null) {
@@ -101,6 +120,8 @@ fun InviteEventScreen(
                 e = event!!,
                 inviteStatus = inviteStatus,
                 publicListingOnly = publicListingOnly,
+                calendarSharingEnabled = calendarSharingEnabled,
+                onOpenCalendarSettings = onOpenCalendarSettings,
                 selectedPresets = selectedPresets,
                 onPresetsChange = { selectedPresets = it },
                 notes = notes,
@@ -147,14 +168,22 @@ fun InviteEventScreen(
                     }
                 },
                 onSaveAvailability = {
-                    scope.launch {
-                        val r = withContext(Dispatchers.IO) {
-                            repo.submitAvailability(eventId, selectedPresets, notes)
-                        }
-                        r.onSuccess {
-                            Toast.makeText(context, "Availability saved", Toast.LENGTH_SHORT).show()
-                        }.onFailure {
-                            Toast.makeText(context, "Couldn't save right now. Please try again.", Toast.LENGTH_LONG).show()
+                    if (!sessionPrefs.isCalendarAvailabilitySharingEnabled()) {
+                        Toast.makeText(
+                            context,
+                            "Turn on “Share availability with hosts” in Settings to save.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        scope.launch {
+                            val r = withContext(Dispatchers.IO) {
+                                repo.submitAvailability(eventId, selectedPresets, notes)
+                            }
+                            r.onSuccess {
+                                Toast.makeText(context, "Availability saved", Toast.LENGTH_SHORT).show()
+                            }.onFailure {
+                                Toast.makeText(context, "Couldn't save right now. Please try again.", Toast.LENGTH_LONG).show()
+                            }
                         }
                     }
                 },
@@ -170,6 +199,8 @@ private fun InviteEventBody(
     e: EventRow,
     inviteStatus: String?,
     publicListingOnly: Boolean,
+    calendarSharingEnabled: Boolean,
+    onOpenCalendarSettings: () -> Unit,
     selectedPresets: Set<String>,
     onPresetsChange: (Set<String>) -> Unit,
     notes: String,
@@ -241,14 +272,33 @@ private fun InviteEventBody(
         modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
     )
 
+    if (!calendarSharingEnabled) {
+        Text(
+            text = "Calendar sharing is off. Turn it on in Settings → Calendar & availability to save your choices for the host.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        OutlinedButton(onClick = onOpenCalendarSettings, modifier = Modifier.fillMaxWidth()) {
+            Text("Open calendar settings")
+        }
+        Spacer(Modifier.padding(8.dp))
+    }
+
+    val availabilityAlpha = if (calendarSharingEnabled) 1f else 0.45f
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.alpha(availabilityAlpha)
     ) {
         presetOptions.forEach { (key, label) ->
             val sel = key in selectedPresets
             AssistChip(
-                onClick = { onPresetsChange(if (sel) selectedPresets - key else selectedPresets + key) },
+                onClick = {
+                    if (calendarSharingEnabled) {
+                        onPresetsChange(if (sel) selectedPresets - key else selectedPresets + key)
+                    }
+                },
                 label = { Text(label) },
                 colors = AssistChipDefaults.assistChipColors(
                     containerColor = if (sel) MaterialTheme.colorScheme.primaryContainer
@@ -260,12 +310,14 @@ private fun InviteEventBody(
 
     OutlinedTextField(
         value = notes,
-        onValueChange = onNotesChange,
+        onValueChange = { if (calendarSharingEnabled) onNotesChange(it) },
         label = { Text("Notes (optional)") },
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 12.dp),
-        minLines = 2
+            .padding(top = 12.dp)
+            .alpha(availabilityAlpha),
+        minLines = 2,
+        enabled = calendarSharingEnabled
     )
 
     Spacer(Modifier.padding(12.dp))
@@ -281,7 +333,8 @@ private fun InviteEventBody(
         onClick = onSaveAvailability,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp)
+            .padding(top = 8.dp),
+        enabled = calendarSharingEnabled
     ) {
         Text("Save availability")
     }
