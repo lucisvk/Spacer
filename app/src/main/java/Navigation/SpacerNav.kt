@@ -172,7 +172,13 @@ fun SpacerAppScaffold(
                         val id = entry.arguments?.getString("eventId").orEmpty()
                         InviteEventScreen(
                             eventId = id,
-                            onBack = { innerNav.popBackStack() }
+                            onBack = { innerNav.popBackStack() },
+                            onOpenCalendarSettings = {
+                                navController.navigate(AppRoutes.Settings) {
+                                    launchSingleTop = true
+                                }
+                            },
+                            outerNavController = navController
                         )
                     }
                     composable(

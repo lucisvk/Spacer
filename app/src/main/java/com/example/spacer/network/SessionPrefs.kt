@@ -19,6 +19,8 @@ class SessionPrefs(context: Context) {
                 .putInt(KEY_HOSTED_COUNT, 0)
                 .putInt(KEY_ATTENDED_COUNT, 0)
                 .putInt(KEY_FRIENDS_COUNT, 0)
+                .putBoolean(KEY_CALENDAR_SHARING, true)
+                .putBoolean(KEY_CALENDAR_CONFLICT_NOTIFY, false)
                 .apply()
         }
     }
@@ -53,6 +55,18 @@ class SessionPrefs(context: Context) {
 
     fun getFriendsCount(): Int = prefs.getInt(KEY_FRIENDS_COUNT, 0)
 
+    fun saveHostedCount(value: Int) {
+        prefs.edit().putInt(KEY_HOSTED_COUNT, value.coerceAtLeast(0)).apply()
+    }
+
+    fun saveAttendedCount(value: Int) {
+        prefs.edit().putInt(KEY_ATTENDED_COUNT, value.coerceAtLeast(0)).apply()
+    }
+
+    fun saveFriendsCount(value: Int) {
+        prefs.edit().putInt(KEY_FRIENDS_COUNT, value.coerceAtLeast(0)).apply()
+    }
+
     fun incrementHostedCount() {
         prefs.edit().putInt(KEY_HOSTED_COUNT, getHostedCount() + 1).apply()
     }
@@ -65,6 +79,47 @@ class SessionPrefs(context: Context) {
         prefs.edit().putInt(KEY_FRIENDS_COUNT, getFriendsCount() + 1).apply()
     }
 
+    /** Cache the most frequently read profile data for fast local restore. */
+    fun saveProfileSnapshot(
+        profileName: String,
+        aboutMe: String,
+        profileImageUri: String?,
+        hostedCount: Int,
+        attendedCount: Int,
+        friendsCount: Int
+    ) {
+        prefs.edit()
+            .putString(KEY_PROFILE_NAME, profileName)
+            .putString(KEY_ABOUT_ME, aboutMe)
+            .putString(KEY_PROFILE_IMAGE_URI, profileImageUri)
+            .putInt(KEY_HOSTED_COUNT, hostedCount.coerceAtLeast(0))
+            .putInt(KEY_ATTENDED_COUNT, attendedCount.coerceAtLeast(0))
+            .putInt(KEY_FRIENDS_COUNT, friendsCount.coerceAtLeast(0))
+            .apply()
+    }
+
+    /**
+     * When true, the user allows Spacer to share invite availability with hosts (saved presets / notes).
+     * Full read-sync with Google Calendar can be layered on later; this flag is the in-app consent gate.
+     */
+    fun isCalendarAvailabilitySharingEnabled(): Boolean =
+        prefs.getBoolean(KEY_CALENDAR_SHARING, true)
+
+    fun setCalendarAvailabilitySharingEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_CALENDAR_SHARING, value).apply()
+        if (!value) {
+            prefs.edit().putBoolean(KEY_CALENDAR_CONFLICT_NOTIFY, false).apply()
+        }
+    }
+
+    /** When true, notify the user if an invite time may conflict with calendar busy time (future work). */
+    fun isCalendarConflictNotificationsEnabled(): Boolean =
+        prefs.getBoolean(KEY_CALENDAR_CONFLICT_NOTIFY, false)
+
+    fun setCalendarConflictNotificationsEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_CALENDAR_CONFLICT_NOTIFY, value).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "spacer_session"
         private const val KEY_LOGGED_IN = "logged_in"
@@ -75,5 +130,7 @@ class SessionPrefs(context: Context) {
         private const val KEY_HOSTED_COUNT = "hosted_count"
         private const val KEY_ATTENDED_COUNT = "attended_count"
         private const val KEY_FRIENDS_COUNT = "friends_count"
+        private const val KEY_CALENDAR_SHARING = "calendar_availability_sharing_enabled"
+        private const val KEY_CALENDAR_CONFLICT_NOTIFY = "calendar_conflict_notifications_enabled"
     }
 }

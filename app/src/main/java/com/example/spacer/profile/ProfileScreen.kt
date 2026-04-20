@@ -75,6 +75,18 @@ fun ProfileScreen(
     var attendedCount by remember { mutableStateOf(0) }
     var friendsCount by remember { mutableStateOf(0) }
 
+    fun loadFromCache() {
+        val cachedName = sessionPrefs.getProfileName().trim()
+        if (username.isBlank() && fullName.isBlank()) {
+            fullName = cachedName
+            username = cachedName
+        }
+        avatarUrl = avatarUrl ?: sessionPrefs.getProfileImageUri()
+        hostedCount = sessionPrefs.getHostedCount()
+        attendedCount = sessionPrefs.getAttendedCount()
+        friendsCount = sessionPrefs.getFriendsCount()
+    }
+
     suspend fun loadProfile() {
         isLoading = true
         loadError = null
@@ -93,14 +105,26 @@ fun ProfileScreen(
                 if (label.isNotBlank()) {
                     sessionPrefs.saveProfileName(label)
                 }
+                sessionPrefs.saveProfileSnapshot(
+                    profileName = label.ifBlank { username.ifBlank { fullName } },
+                    aboutMe = snapshot.profile.aboutMe.orEmpty(),
+                    profileImageUri = avatarUrl,
+                    hostedCount = hostedCount,
+                    attendedCount = attendedCount,
+                    friendsCount = friendsCount
+                )
             }
             .onFailure { e ->
                 loadError = e.message ?: "Failed to load profile"
+                loadFromCache()
             }
         isLoading = false
     }
 
-    LaunchedEffect(Unit) { loadProfile() }
+    LaunchedEffect(Unit) {
+        loadFromCache()
+        loadProfile()
+    }
 
     DisposableEffect(navController) {
         val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
