@@ -114,7 +114,7 @@ fun FindPeopleScreen(
 
         when {
             !queryReady && !loading -> Text(
-                "Type to search profiles; sample people match “alex”, “sam”, or “river”.",
+                "Type to search profiles by name, username, or email prefix.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
             )

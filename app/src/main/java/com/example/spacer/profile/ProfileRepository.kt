@@ -351,8 +351,9 @@ class ProfileRepository {
     private val supabase = SupabaseManager.client
 
     companion object {
-        fun isOfflineDemoProfile(id: String): Boolean =
-            FindPeopleDemoDirectory.isDemoId(id) || DemoProfileDetailsDirectory.isDemoId(id)
+        fun isOfflineDemoProfile(_id: String): Boolean {
+            return false
+        }
     }
 
     private fun parseDateSafely(value: String): OffsetDateTime? {
@@ -578,8 +579,7 @@ class ProfileRepository {
                 }.take(40)
             }
 
-            val demo = FindPeopleDemoDirectory.matches(safe)
-            val out = (merged + demo).distinctBy { it.id }.take(40)
+            val out = merged.take(40)
             Result.success(out)
         } catch (e: Exception) {
             Result.failure(e)
@@ -593,10 +593,6 @@ class ProfileRepository {
             if (targetUserId == user.id) {
                 return Result.failure(IllegalArgumentException("You can't add yourself"))
             }
-            if (isOfflineDemoProfile(targetUserId)) {
-                return Result.success(Unit)
-            }
-
             supabase.from("friend_requests").insert(
                 FriendRequestInsert(
                     senderId = user.id,
@@ -616,10 +612,6 @@ class ProfileRepository {
             if (targetUserId == user.id) {
                 return Result.failure(IllegalArgumentException("You can't block yourself"))
             }
-            if (isOfflineDemoProfile(targetUserId)) {
-                return Result.success(Unit)
-            }
-
             supabase.from("user_blocks").insert(
                 UserBlockInsert(
                     blockerId = user.id,
@@ -643,10 +635,6 @@ class ProfileRepository {
             if (targetUserId == user.id) {
                 return Result.failure(IllegalArgumentException("You can't report yourself"))
             }
-            if (isOfflineDemoProfile(targetUserId)) {
-                return Result.success(Unit)
-            }
-
             supabase.from("user_reports").insert(
                 UserReportInsert(
                     reporterId = user.id,
@@ -758,10 +746,6 @@ class ProfileRepository {
 
     suspend fun getPublicProfile(userId: String): Result<PublicProfileSnapshot> {
         return try {
-            DemoProfileDetailsDirectory.profileFor(userId)?.let { demo ->
-                return Result.success(demo)
-            }
-
             val p = supabase.from("profiles")
                 .select {
                     filter { eq("id", userId) }
