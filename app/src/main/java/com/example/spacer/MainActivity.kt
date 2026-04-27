@@ -71,7 +71,6 @@ import com.example.spacer.network.LoginRequest
 import com.example.spacer.network.SessionPrefs
 import com.example.spacer.network.SignupRequest
 import com.example.spacer.network.SupabaseManager
-import com.example.spacer.network.SessionPrefs
 import com.example.spacer.ui.theme.SpacerTheme
 import io.github.jan.supabase.auth.handleDeeplinks
 import io.github.jan.supabase.auth.providers.Discord

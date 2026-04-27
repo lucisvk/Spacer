@@ -4,8 +4,11 @@ import android.content.Intent
 import android.location.Location
 import android.location.LocationManager
 import android.net.Uri
+import android.os.Build
 import android.provider.CalendarContract
 import android.widget.Toast
+import androidx.core.net.toUri
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -29,10 +32,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,9 +70,9 @@ private val presetOptions = listOf(
 @Composable
 fun InviteEventScreen(
     eventId: String,
+    modifier: Modifier = Modifier,
     onBack: () -> Unit,
-    onOpenEventChat: () -> Unit = {},
-    modifier: Modifier = Modifier
+    onOpenEventChat: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val sessionPrefs = remember { SessionPrefs(context) }
@@ -87,12 +88,10 @@ fun InviteEventScreen(
     var calendarSharingEnabled by remember { mutableStateOf(sessionPrefs.isCalendarAvailabilitySharingEnabled()) }
     var distanceLabel by remember { mutableStateOf<String?>(null) }
     var bringClaims by remember { mutableStateOf<List<BringItemClaimUi>>(emptyList()) }
-    val availabilityAlpha = if (calendarSharingEnabled) 1f else 0.45f
 
     LaunchedEffect(eventId) {
         loading = true
         publicListingOnly = false
-        calendarSharingEnabled = sessionPrefs.isCalendarAvailabilitySharingEnabled()
         val ev = withContext(Dispatchers.IO) { repo.getEvent(eventId).getOrNull() }
         event = ev
         if (ev == null) {
@@ -130,6 +129,7 @@ fun InviteEventScreen(
                 e = currentEvent,
                 inviteStatus = inviteStatus,
                 publicListingOnly = publicListingOnly,
+                calendarSharingEnabled = calendarSharingEnabled,
                 selectedPresets = selectedPresets,
                 onPresetsChange = { selectedPresets = it },
                 notes = notes,
@@ -140,11 +140,15 @@ fun InviteEventScreen(
                         Toast.makeText(context, "Event data is still loading.", Toast.LENGTH_SHORT).show()
                         return@InviteEventBody
                     }
-                    val startMillis = parseStartMillis(evForCalendar.startsAt, evForCalendar.endsAt)
+                    val startMillis = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        parseStartMillis(evForCalendar.startsAt)
+                    } else null
                     if (startMillis == null) {
                         Toast.makeText(context, "Couldn't add this to calendar right now.", Toast.LENGTH_SHORT).show()
                     } else {
-                        val endMillis = parseEndMillis(evForCalendar.startsAt, evForCalendar.endsAt) ?: (startMillis + 60 * 60 * 1000)
+                        val endMillis = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            parseEndMillis(evForCalendar.endsAt)
+                        } else null ?: (startMillis + 60 * 60 * 1000)
                         val intent = Intent(Intent.ACTION_INSERT).apply {
                             data = CalendarContract.Events.CONTENT_URI
                             putExtra(CalendarContract.Events.TITLE, evForCalendar.title)
@@ -226,6 +230,7 @@ private fun InviteEventBody(
     e: EventRow,
     inviteStatus: String?,
     publicListingOnly: Boolean,
+    calendarSharingEnabled: Boolean,
     selectedPresets: Set<String>,
     onPresetsChange: (Set<String>) -> Unit,
     notes: String,
@@ -241,6 +246,7 @@ private fun InviteEventBody(
     bringClaims: List<BringItemClaimUi>,
     onToggleBringClaim: (itemLabel: String, claim: Boolean) -> Unit
 ) {
+    val availabilityAlpha = if (calendarSharingEnabled) 1f else 0.45f
     Surface(
         shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
@@ -300,7 +306,7 @@ private fun InviteEventBody(
             val claim = bringClaims.firstOrNull { it.itemKey == key }
             val claimed = claim != null
             Text(
-                if (claimed) "$item — ${claim?.claimedByName} is bringing this" else "$item — unclaimed",
+                if (claimed) "$item — ${claim.claimedByName} is bringing this" else "$item — unclaimed",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
                     .padding(top = 4.dp)
@@ -470,7 +476,8 @@ private fun InviteEventBody(
     ) { Text("Open event chat") }
 }
 
-private fun parseStartMillis(startsAt: String, endsAt: String?): Long? {
+@RequiresApi(Build.VERSION_CODES.O)
+private fun parseStartMillis(startsAt: String): Long? {
     return try {
         val odt = OffsetDateTime.parse(startsAt)
         odt.atZoneSameInstant(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -479,7 +486,8 @@ private fun parseStartMillis(startsAt: String, endsAt: String?): Long? {
     }
 }
 
-private fun parseEndMillis(startsAt: String, endsAt: String?): Long? {
+@RequiresApi(Build.VERSION_CODES.O)
+private fun parseEndMillis(endsAt: String?): Long? {
     val end = endsAt?.takeIf { it.isNotBlank() } ?: return null
     return try {
         val odt = OffsetDateTime.parse(end)
@@ -491,7 +499,7 @@ private fun parseEndMillis(startsAt: String, endsAt: String?): Long? {
 
 private fun openGoogleMapsForPlace(context: android.content.Context, location: String) {
     val encoded = URLEncoder.encode(location, "UTF-8")
-    val mapsUri = Uri.parse("https://www.google.com/maps/search/?api=1&query=$encoded")
+    val mapsUri = "https://www.google.com/maps/search/?api=1&query=$encoded".toUri()
     val intent = Intent(Intent.ACTION_VIEW, mapsUri).apply {
         setPackage("com.google.android.apps.maps")
     }

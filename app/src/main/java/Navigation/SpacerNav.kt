@@ -105,80 +105,6 @@ private data class BottomNavItem(
     val iconRes: Int
 )
 
-@Composable
-fun SpacerBottomBar(
-    navController: NavHostController,
-    onNavigate: () -> Unit
-) {
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = navBackStackEntry?.destination
-
-    // Floating "glass" bar: translucent fill + light edge + rounded pill (Apple-style, no backdrop blur on all APIs).
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 18.dp, vertical = 10.dp)
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(58.dp),
-            shape = RoundedCornerShape(30.dp),
-            color = SpacerPurpleSurface.copy(alpha = 0.52f),
-            tonalElevation = 0.dp,
-            shadowElevation = 10.dp,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
-        ) {
-            NavigationBar(
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = Color.Transparent,
-                contentColor = Color.White.copy(alpha = 0.92f),
-                tonalElevation = 0.dp
-            ) {
-                bottomNavItems.forEach { item ->
-                    val selected = currentDestination
-                        ?.hierarchy
-                        ?.any { it.route == item.route } == true
-
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = {
-                            onNavigate()
-                            navController.navigate(item.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = item.route != AppRoutes.Create
-                            }
-                        },
-                        icon = {
-                            Icon(
-                                painter = painterResource(id = item.iconRes),
-                                contentDescription = item.label,
-                                tint = if (selected) {
-                                    SpacerPurplePrimary
-                                } else {
-                                    Color.White.copy(alpha = 0.55f)
-                                }
-                            )
-                        },
-                        label = {},
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = SpacerPurplePrimary,
-                            unselectedIconColor = Color.White.copy(alpha = 0.55f),
-                            selectedTextColor = SpacerPurplePrimary,
-                            unselectedTextColor = Color.White.copy(alpha = 0.55f),
-                            indicatorColor = SpacerPurplePrimary.copy(alpha = 0.2f)
-                        )
-                    )
-                }
-            }
-        }
-    }
-}
-
 private val bottomNavItems = listOf(
     BottomNavItem(label = "Home", route = AppRoutes.Home, iconRes = R.drawable.home_button),
     BottomNavItem(label = "Events", route = AppRoutes.Events, iconRes = R.drawable.calendar_button),
@@ -305,13 +231,7 @@ fun SpacerAppScaffold(
                         InviteEventScreen(
                             eventId = id,
                             onBack = { innerNav.popBackStack() },
-                            onOpenEventChat = { innerNav.navigate("event_chat/$id") },
-                            onOpenCalendarSettings = {
-                                navController.navigate(AppRoutes.Settings) {
-                                    launchSingleTop = true
-                                }
-                            },
-                            outerNavController = navController
+                            onOpenEventChat = { innerNav.navigate("event_chat/$id") }
                         )
                     }
                     composable(

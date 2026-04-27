@@ -107,18 +107,6 @@ fun ProfileScreen(
         friendsCount = sessionPrefs.getFriendsCount()
     }
 
-    fun loadFromCache() {
-        val cachedName = sessionPrefs.getProfileName().trim()
-        if (username.isBlank() && fullName.isBlank()) {
-            fullName = cachedName
-            username = cachedName
-        }
-        avatarUrl = avatarUrl ?: sessionPrefs.getProfileImageUri()
-        hostedCount = sessionPrefs.getHostedCount()
-        attendedCount = sessionPrefs.getAttendedCount()
-        friendsCount = sessionPrefs.getFriendsCount()
-    }
-
     suspend fun loadProfile() {
         isLoading = true
         loadError = null
