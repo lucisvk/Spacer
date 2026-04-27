@@ -112,6 +112,7 @@ internal data class OpeningHoursJson(
     val weekdayDescriptions: List<String>? = null
 )
 
+@Serializable
 data class PlaceUi(
     val id: String,
     val name: String,

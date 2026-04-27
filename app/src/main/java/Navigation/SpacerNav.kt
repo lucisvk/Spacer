@@ -28,12 +28,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -65,6 +65,11 @@ import com.example.spacer.location.CreateEventPlaceScreen
 import com.example.spacer.location.PlaceDetailScreen
 import com.example.spacer.location.PlaceUi
 import com.example.spacer.location.toPlaceUi
+import com.example.spacer.chatbot.EventPlanningChatbotScreen
+import com.example.spacer.chatbot.EventData
+import com.example.spacer.chatbot.CreateChoiceScreen
+import com.example.spacer.chatbot.ConversationListScreen
+import com.example.spacer.chatbot.ChatPrefs
 import com.example.spacer.ui.theme.SpacerPurplePrimary
 import com.example.spacer.ui.theme.SpacerPurpleSurface
 import androidx.compose.ui.unit.dp
@@ -88,6 +93,80 @@ private data class BottomNavItem(
     val route: String,
     val iconRes: Int
 )
+
+@Composable
+fun SpacerBottomBar(
+    navController: NavHostController,
+    onNavigate: () -> Unit
+) {
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
+
+    // Floating "glass" bar: translucent fill + light edge + rounded pill (Apple-style, no backdrop blur on all APIs).
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 10.dp)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(58.dp),
+            shape = RoundedCornerShape(30.dp),
+            color = SpacerPurpleSurface.copy(alpha = 0.52f),
+            tonalElevation = 0.dp,
+            shadowElevation = 10.dp,
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
+        ) {
+            NavigationBar(
+                modifier = Modifier.fillMaxWidth(),
+                containerColor = Color.Transparent,
+                contentColor = Color.White.copy(alpha = 0.92f),
+                tonalElevation = 0.dp
+            ) {
+                bottomNavItems.forEach { item ->
+                    val selected = currentDestination
+                        ?.hierarchy
+                        ?.any { it.route == item.route } == true
+
+                    NavigationBarItem(
+                        selected = selected,
+                        onClick = {
+                            onNavigate()
+                            navController.navigate(item.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = item.route != AppRoutes.Create
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                painter = painterResource(id = item.iconRes),
+                                contentDescription = item.label,
+                                tint = if (selected) {
+                                    SpacerPurplePrimary
+                                } else {
+                                    Color.White.copy(alpha = 0.55f)
+                                }
+                            )
+                        },
+                        label = {},
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = SpacerPurplePrimary,
+                            unselectedIconColor = Color.White.copy(alpha = 0.55f),
+                            selectedTextColor = SpacerPurplePrimary,
+                            unselectedTextColor = Color.White.copy(alpha = 0.55f),
+                            indicatorColor = SpacerPurplePrimary.copy(alpha = 0.2f)
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
 
 private val bottomNavItems = listOf(
     BottomNavItem(label = "Home", route = AppRoutes.Home, iconRes = R.drawable.home_button),
@@ -211,9 +290,85 @@ fun SpacerAppScaffold(
                 var draftEventTitle by remember { mutableStateOf("") }
                 NavHost(
                     navController = innerNav,
-                    startDestination = "create_place",
+                    startDestination = "create_choice",
                     modifier = Modifier.fillMaxSize()
                 ) {
+                    composable("create_choice") {
+                        CreateChoiceScreen(
+                            onUseChatbot = {
+                                innerNav.navigate("chatbot_list")
+                            },
+                            onUseManual = {
+                                innerNav.navigate("create_place")
+                            }
+                        )
+                    }
+                    composable("chatbot_list") {
+                        val context = LocalContext.current
+                        val chatPrefs = remember { ChatPrefs(context) }
+                        ConversationListScreen(
+                            chatPrefs = chatPrefs,
+                            onSelectConversation = { conversationId ->
+                                innerNav.navigate("chatbot_create/$conversationId")
+                            },
+                            onNewConversation = {
+                                innerNav.navigate("chatbot_create/null")
+                            },
+                            onBack = { innerNav.popBackStack() }
+                        )
+                    }
+                    composable("chatbot_create/{conversationId}") { backStackEntry ->
+                        val conversationId = backStackEntry.arguments?.getString("conversationId")
+                        var chatbotVenue by remember { mutableStateOf<PlaceUi?>(null) }
+                        EventPlanningChatbotScreen(
+                            conversationId = conversationId,
+                            onBack = { innerNav.popBackStack("chatbot_list", inclusive = false) },
+                            onOpenVenueSelection = { onVenueSelected ->
+                                chatbotVenue = null
+                                innerNav.navigate("chatbot_place_selection")
+                                innerNav.currentBackStackEntry?.savedStateHandle?.set(
+                                    "venue_callback",
+                                    onVenueSelected
+                                )
+                            },
+                            onCreateEvent = { data ->
+                                // Navigate to create_details with the collected data
+                                val place = data.venue
+                                if (place != null) {
+                                    selectedVenue = place
+                                    draftEventTitle = data.selectedIdea.ifBlank { "Event with ${data.groupSize} friends" }
+                                    innerNav.navigate("create_details") { launchSingleTop = true }
+                                }
+                            }
+                        )
+                    }
+                    composable("chatbot_place_selection") {
+                        val venueCallback = innerNav.previousBackStackEntry
+                            ?.savedStateHandle
+                            ?.get<(PlaceUi) -> Unit>("venue_callback")
+
+                        CreateEventPlaceScreen(
+                            selectedPlace = selectedVenue,
+                            onSelectedPlaceChange = { selectedVenue = it },
+                            eventTitle = draftEventTitle,
+                            onEventTitleChange = { draftEventTitle = it },
+                            onOpenPlaceDetail = { place ->
+                                innerNav.navigate("place_detail/${Uri.encode(place.id, "UTF-8")}")
+                            },
+                            onContinue = {
+                                if (selectedVenue != null) {
+                                    venueCallback?.invoke(selectedVenue!!)
+                                    innerNav.popBackStack()
+                                }
+                            },
+                            onUsePlaceForEvent = {
+                                if (selectedVenue != null) {
+                                    venueCallback?.invoke(selectedVenue!!)
+                                    innerNav.popBackStack()
+                                }
+                            }
+                        )
+                    }
                     composable("create_place") {
                         CreateEventPlaceScreen(
                             selectedPlace = selectedVenue,
@@ -249,7 +404,7 @@ fun SpacerAppScaffold(
                                 onPublished = {
                                     draftEventTitle = ""
                                     selectedVenue = null
-                                    innerNav.popBackStack("create_place", inclusive = false)
+                                    innerNav.popBackStack("create_choice", inclusive = false)
                                     navController.navigate(AppRoutes.Events) {
                                         popUpTo(navController.graph.findStartDestination().id) {
                                             saveState = true
@@ -313,10 +468,10 @@ fun SpacerAppScaffold(
             composable(AppRoutes.Friends) {
                 FriendsScreen(onBack = { navController.popBackStack() })
             }
-            }
         }
+    }
 
-        FloatingActionButton(
+    FloatingActionButton(
             onClick = { navBarVisible = !navBarVisible },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -347,78 +502,3 @@ fun SpacerAppScaffold(
         }
     }
 }
-
-@Composable
-private fun SpacerBottomBar(
-    navController: NavHostController,
-    onNavigate: () -> Unit
-) {
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = navBackStackEntry?.destination
-
-    // Floating “glass” bar: translucent fill + light edge + rounded pill (Apple-style, no backdrop blur on all APIs).
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 18.dp, vertical = 10.dp)
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(58.dp),
-            shape = RoundedCornerShape(30.dp),
-            color = SpacerPurpleSurface.copy(alpha = 0.52f),
-            tonalElevation = 0.dp,
-            shadowElevation = 10.dp,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
-        ) {
-            NavigationBar(
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = Color.Transparent,
-                contentColor = Color.White.copy(alpha = 0.92f),
-                tonalElevation = 0.dp
-            ) {
-                bottomNavItems.forEach { item ->
-                    val selected = currentDestination
-                        ?.hierarchy
-                        ?.any { it.route == item.route } == true
-
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = {
-                            onNavigate()
-                            navController.navigate(item.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = item.route != AppRoutes.Create
-                            }
-                        },
-                        icon = {
-                            Icon(
-                                painter = painterResource(id = item.iconRes),
-                                contentDescription = item.label,
-                                tint = if (selected) {
-                                    SpacerPurplePrimary
-                                } else {
-                                    Color.White.copy(alpha = 0.55f)
-                                }
-                            )
-                        },
-                        label = {},
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = SpacerPurplePrimary,
-                            unselectedIconColor = Color.White.copy(alpha = 0.55f),
-                            selectedTextColor = SpacerPurplePrimary,
-                            unselectedTextColor = Color.White.copy(alpha = 0.55f),
-                            indicatorColor = SpacerPurplePrimary.copy(alpha = 0.2f)
-                        )
-                    )
-                }
-            }
-        }
-    }
-}
-

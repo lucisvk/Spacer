@@ -44,6 +44,7 @@ Spacer is a mobile event planning application that helps users create events, co
 - Google OAuth
 - Google Maps
 - Google Calendar
+- Groq Cloud
 
 ---
 

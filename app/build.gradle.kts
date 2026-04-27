@@ -76,6 +76,12 @@ android {
             "PLACES_API_KEY",
             asBuildConfigString(secret("PLACES_API_KEY"))
         )
+
+        buildConfigField(
+            "String",
+            "GROQ_API_KEY",
+            asBuildConfigString(secret("GROQ_API_KEY"))
+        )
     }
 
     buildTypes {

@@ -64,6 +64,7 @@ import com.example.spacer.network.AuthRepository
 import com.example.spacer.network.LoginRequest
 import com.example.spacer.network.SignupRequest
 import com.example.spacer.network.SupabaseManager
+import com.example.spacer.network.SessionPrefs
 import com.example.spacer.ui.theme.SpacerTheme
 import io.github.jan.supabase.auth.handleDeeplinks
 import io.github.jan.supabase.auth.providers.Discord
@@ -288,6 +289,7 @@ private fun LoginScreen(
     val authRepository = remember { AuthRepository() }
     val scope = rememberCoroutineScope()
     val sessionStatus by SupabaseManager.client.auth.sessionStatus.collectAsState()
+    val sessionPrefs = remember { SessionPrefs(context) }
 
     LaunchedEffect(sessionStatus) {
         if (sessionStatus is SessionStatus.Authenticated) {
@@ -540,6 +542,23 @@ private fun LoginScreen(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().clickable { onCreateAccountClick() }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Demo Mode (Skip Login)",
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.tertiary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        sessionPrefs.setLoggedIn(true)
+                        sessionPrefs.saveProfileName("Demo User")
+                        onLoginSuccess()
+                    }
+                    .padding(8.dp)
             )
         }
     }
