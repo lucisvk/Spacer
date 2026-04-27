@@ -3,10 +3,10 @@ name: Android CI
 on:
   push:
     branches:
-      - Dev
+      - "**"
   pull_request:
     branches:
-      - Dev
+      - "**"
 
 concurrency:
   group: android-ci-${{ github.ref }}
