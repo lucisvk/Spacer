@@ -8,6 +8,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -59,9 +62,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.spacer.Navigation.SpacerAppScaffold
+import com.example.spacer.events.CalendarConflictNotifier
+import com.example.spacer.events.NotificationsRepository
 import com.example.spacer.events.TodayEventNotifier
+import com.example.spacer.events.UserNotificationDispatcher
 import com.example.spacer.network.AuthRepository
 import com.example.spacer.network.LoginRequest
+import com.example.spacer.network.SessionPrefs
 import com.example.spacer.network.SignupRequest
 import com.example.spacer.network.SupabaseManager
 import com.example.spacer.network.SessionPrefs
@@ -75,6 +82,8 @@ import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -87,6 +96,9 @@ private object Routes {
 }
 
 class MainActivity : ComponentActivity() {
+    private val pendingDeepLink = MutableStateFlow<String?>(null)
+    private val notificationsRepository by lazy { NotificationsRepository() }
+
     private val notificationsPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
@@ -96,21 +108,39 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // Required for OAuth + OTP links on Android when using deeplinks.
         SupabaseManager.client.handleDeeplinks(intent)
+        pendingDeepLink.value = intent.extractAppDeepLink()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) {
+                    runCatching {
+                        UserNotificationDispatcher.flushUnreadToPhone(this@MainActivity, notificationsRepository)
+                    }
+                    delay(8_000)
+                }
+            }
+        }
 
         setContent {
-            var isDarkTheme by remember { mutableStateOf(true) }
+            val sessionPrefs = remember { SessionPrefs(this) }
+            var isDarkTheme by remember { mutableStateOf(sessionPrefs.isDarkThemeEnabled()) }
 
             SpacerTheme(darkTheme = isDarkTheme) {
                 val navController = rememberNavController()
+                val routeDeepLink by pendingDeepLink.collectAsState()
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     SpacerNavHost(
                         navController = navController,
                         isDarkTheme = isDarkTheme,
-                        onToggleTheme = { isDarkTheme = !isDarkTheme },
+                        onToggleTheme = {
+                            isDarkTheme = !isDarkTheme
+                            sessionPrefs.setDarkThemeEnabled(isDarkTheme)
+                        },
+                        pendingDeepLink = routeDeepLink,
+                        onDeepLinkConsumed = { pendingDeepLink.value = null },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -123,6 +153,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         // Required when OAuth callback returns while activity already exists.
         SupabaseManager.client.handleDeeplinks(intent)
+        pendingDeepLink.value = intent.extractAppDeepLink()
     }
 
     override fun onResume() {
@@ -132,11 +163,20 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private fun Intent?.extractAppDeepLink(): String? {
+    val dataUri = this?.data ?: return null
+    val host = dataUri.host?.lowercase() ?: return null
+    if (host == "auth") return null
+    return dataUri.toString()
+}
+
 @Composable
 private fun SpacerNavHost(
     navController: NavHostController,
     isDarkTheme: Boolean,
     onToggleTheme: () -> Unit,
+    pendingDeepLink: String?,
+    onDeepLinkConsumed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val authRepository = remember { AuthRepository() }
@@ -186,6 +226,7 @@ private fun SpacerNavHost(
             LaunchedEffect(Unit) {
                 withContext(Dispatchers.IO) {
                     TodayEventNotifier(context).notifyHostedEventsForToday()
+                    CalendarConflictNotifier(context).notifyPendingInviteCalendarConflicts()
                 }
             }
             SpacerAppScaffold(
@@ -200,7 +241,9 @@ private fun SpacerNavHost(
                     }
                 },
                 isDarkTheme = isDarkTheme,
-                onToggleTheme = onToggleTheme
+                onToggleTheme = onToggleTheme,
+                pendingDeepLink = pendingDeepLink,
+                onDeepLinkConsumed = onDeepLinkConsumed
             )
         }
     }

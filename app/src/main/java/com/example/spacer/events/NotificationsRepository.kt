@@ -1,5 +1,6 @@
 package com.example.spacer.events
 
+import android.util.Log
 import com.example.spacer.network.SupabaseManager
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
@@ -19,8 +20,30 @@ data class UserNotificationRow(
     val readAt: String? = null
 )
 
+@Serializable
+private data class UserNotificationInsert(
+    @SerialName("user_id")
+    val userId: String,
+    val title: String,
+    val body: String
+)
+
 class NotificationsRepository {
     private val supabase = SupabaseManager.client
+
+    private companion object {
+        const val TAG = "NotificationsRepo"
+    }
+
+    object DeepLinks {
+        fun eventsHub(): String = "spacer://events"
+        fun eventInvite(eventId: String): String = "spacer://event/$eventId"
+        fun eventChat(eventId: String): String = "spacer://event-chat/$eventId"
+        fun dmThreads(): String = "spacer://dm/threads"
+        fun dmChat(peerUserId: String): String = "spacer://dm/$peerUserId"
+        fun socialRequests(): String = "spacer://social/requests"
+        fun publicProfile(userId: String): String = "spacer://profile/$userId"
+    }
 
     suspend fun listUnread(): Result<List<UserNotificationRow>> {
         return try {
@@ -37,6 +60,7 @@ class NotificationsRepository {
                 .sortedByDescending { it.createdAt ?: "" }
             Result.success(rows)
         } catch (e: Exception) {
+            Log.e(TAG, "listUnread failed", e)
             Result.success(emptyList())
         }
     }
@@ -52,6 +76,36 @@ class NotificationsRepository {
             }
             Result.success(Unit)
         } catch (e: Exception) {
+            Log.e(TAG, "markRead failed for id=$notificationId", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createForUser(
+        userId: String,
+        title: String,
+        body: String,
+        deepLink: String? = null
+    ): Result<Unit> {
+        return try {
+            val normalizedBody = buildString {
+                append(body.trim().ifBlank { "You have a new update." })
+                val link = deepLink?.trim().orEmpty()
+                if (link.isNotBlank()) {
+                    append("\n")
+                    append(link)
+                }
+            }
+            supabase.from("user_notifications").insert(
+                UserNotificationInsert(
+                    userId = userId,
+                    title = title.trim().ifBlank { "Notification" },
+                    body = normalizedBody
+                )
+            )
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "createForUser failed for userId=$userId", e)
             Result.failure(e)
         }
     }

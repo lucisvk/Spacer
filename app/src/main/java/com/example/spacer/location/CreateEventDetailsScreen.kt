@@ -44,6 +44,7 @@ import com.example.spacer.events.EventRepository
 import com.example.spacer.profile.FriendListItem
 import com.example.spacer.profile.ProfileRepository
 import com.example.spacer.profile.SearchUserRow
+import com.example.spacer.profile.displayName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
@@ -54,6 +55,9 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
+import java.util.Locale
 
 @OptIn(FlowPreview::class)
 @Composable
@@ -71,8 +75,10 @@ fun CreateEventDetailsScreen(
     val eventRepository = remember { EventRepository() }
 
     var eventDescription by remember { mutableStateOf("") }
+    var bringItems by remember { mutableStateOf(listOf<String>()) }
+    var bringItemInput by remember { mutableStateOf("") }
     var eventDate by remember { mutableStateOf("") }
-    var startTimeStr by remember { mutableStateOf("18:00") }
+    var startTimeStr by remember { mutableStateOf("6:00 PM") }
     var endTimeStr by remember { mutableStateOf("") }
     var invitedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var friends by remember { mutableStateOf<List<FriendListItem>>(emptyList()) }
@@ -82,6 +88,7 @@ fun CreateEventDetailsScreen(
     var publishing by remember { mutableStateOf(false) }
     var visibilityPublic by remember { mutableStateOf(true) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
+    var chatMode by remember { mutableStateOf("all_members") }
 
     LaunchedEffect(Unit) {
         val fr = withContext(Dispatchers.IO) { profileRepository.getFriends() }
@@ -189,6 +196,42 @@ fun CreateEventDetailsScreen(
                     colors = detailsFieldColors()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = bringItemInput,
+                    onValueChange = { bringItemInput = it },
+                    label = { Text("Add item people can bring (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 1,
+                    colors = detailsFieldColors()
+                )
+                OutlinedButton(
+                    onClick = {
+                        val item = bringItemInput.trim()
+                        if (item.isBlank()) return@OutlinedButton
+                        if (bringItems.none { it.equals(item, ignoreCase = true) }) {
+                            bringItems = bringItems + item
+                        }
+                        bringItemInput = ""
+                    },
+                    modifier = Modifier.padding(top = 8.dp)
+                ) { Text("Add bring item") }
+                if (bringItems.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    bringItems.forEach { item ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(item, style = MaterialTheme.typography.bodySmall)
+                            OutlinedButton(onClick = {
+                                bringItems = bringItems.filterNot { it.equals(item, ignoreCase = true) }
+                            }) { Text("Remove") }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     "Date & time",
                     style = MaterialTheme.typography.labelLarge,
@@ -213,7 +256,7 @@ fun CreateEventDetailsScreen(
                         value = startTimeStr,
                         onValueChange = { startTimeStr = it },
                         label = { Text("Start") },
-                        placeholder = { Text("18:00") },
+                        placeholder = { Text("6:00 PM") },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         colors = detailsFieldColors()
@@ -222,7 +265,7 @@ fun CreateEventDetailsScreen(
                         value = endTimeStr,
                         onValueChange = { endTimeStr = it },
                         label = { Text("End (optional)") },
-                        placeholder = { Text("21:00") },
+                        placeholder = { Text("9:00 PM") },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         colors = detailsFieldColors()
@@ -258,6 +301,33 @@ fun CreateEventDetailsScreen(
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
                     modifier = Modifier.padding(top = 6.dp, bottom = 12.dp)
                 )
+                Text(
+                    "Event chat permissions",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = chatMode == "all_members",
+                        onClick = { chatMode = "all_members" },
+                        label = { Text("All can chat") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                    FilterChip(
+                        selected = chatMode == "host_cohosts_only",
+                        onClick = { chatMode = "host_cohosts_only" },
+                        label = { Text("Hosts only") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                    FilterChip(
+                        selected = chatMode == "disabled",
+                        onClick = { chatMode = "disabled" },
+                        label = { Text("Disabled") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     "Category tag",
                     style = MaterialTheme.typography.labelLarge,
@@ -355,7 +425,7 @@ fun CreateEventDetailsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                u.fullName?.ifBlank { u.username ?: "User" } ?: (u.username ?: "User"),
+                                u.displayName(),
                                 color = MaterialTheme.colorScheme.onBackground,
                                 style = MaterialTheme.typography.bodyMedium
                             )
@@ -392,7 +462,7 @@ fun CreateEventDetailsScreen(
                         }.getOrElse {
                             Toast.makeText(
                                 context,
-                                "Use date YYYY-MM-DD and time like 18:00",
+                                "Use date YYYY-MM-DD and time like 6:00 PM",
                                 Toast.LENGTH_LONG
                             ).show()
                             return@Button
@@ -418,7 +488,9 @@ fun CreateEventDetailsScreen(
                                     locationLabel = loc,
                                     inviteeIds = invitedIds.toList(),
                                     visibility = if (visibilityPublic) "public" else "invite_only",
-                                    category = selectedCategory
+                                    category = selectedCategory,
+                                    bringItems = eventRepository.encodeBringItems(bringItems),
+                                    chatMode = chatMode
                                 )
                             }
                             publishing = false
@@ -457,8 +529,25 @@ fun CreateEventDetailsScreen(
 
 private fun buildOffsetIso(dateStr: String, timeStr: String): String {
     val d = LocalDate.parse(dateStr)
-    val t = LocalTime.parse(timeStr)
+    val t = parseFlexibleLocalTime(timeStr)
     return d.atTime(t).atZone(ZoneId.systemDefault()).toOffsetDateTime().toString()
+}
+
+private fun parseFlexibleLocalTime(raw: String): LocalTime {
+    val value = raw.trim()
+    val formatters = listOf(
+        DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault()),
+        DateTimeFormatter.ofPattern("h:mma", Locale.getDefault()),
+        DateTimeFormatter.ofPattern("H:mm", Locale.getDefault()),
+        DateTimeFormatter.ISO_LOCAL_TIME
+    )
+    formatters.forEach { formatter ->
+        try {
+            return LocalTime.parse(value.uppercase(Locale.getDefault()), formatter)
+        } catch (_: DateTimeParseException) {
+        }
+    }
+    throw DateTimeParseException("Invalid time", raw, 0)
 }
 
 @Composable

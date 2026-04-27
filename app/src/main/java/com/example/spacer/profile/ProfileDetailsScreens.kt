@@ -5,6 +5,8 @@ import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,8 +20,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -82,6 +89,7 @@ fun HostedEventsScreen(
         events = loaded
         val locs = loaded.map { it.id to (it.location ?: "") }.filter { it.second.isNotBlank() }
         photoUrls = withContext(Dispatchers.IO) {
+            if (!PlacesRepository.isApiKeyConfigured()) return@withContext emptyMap()
             locs.mapNotNull { (eventId, location) ->
                 val photoName = placesRepo.searchText(location)
                     .getOrDefault(emptyList())
@@ -143,68 +151,75 @@ fun HostedEventsScreen(
         )
     }
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
     ) {
-        Text("Hosted Events", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
-        Spacer(modifier = Modifier.height(10.dp))
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
-        Spacer(modifier = Modifier.height(10.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Text("Hosted Events", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+            Spacer(modifier = Modifier.height(10.dp))
 
-        if (loading) {
-            Text("Loading...")
-        } else if (events.isEmpty()) {
-            Text("No hosted events yet.")
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
-                items(events, key = { it.id }) { event ->
-                    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, borderColor),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            Modifier.padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+            if (loading) {
+                Text("Loading...")
+            } else if (events.isEmpty()) {
+                Text("No hosted events yet.")
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 84.dp)
+                ) {
+                    items(events, key = { it.id }) { event ->
+                        val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, borderColor),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            val url = photoUrls[event.id]
-                            if (!url.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = url,
-                                    contentDescription = "Event image",
-                                    modifier = Modifier
-                                        .size(64.dp)
-                                        .clip(RoundedCornerShape(10.dp)),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Spacer(
-                                    modifier = Modifier
-                                        .size(64.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                )
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(event.title, style = MaterialTheme.typography.titleMedium)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    formatEventDateNoTime(event.startsAt),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                event.location?.takeIf { it.isNotBlank() }?.let {
-                                    Text(it, style = MaterialTheme.typography.bodySmall)
+                            Row(
+                                Modifier.padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val url = photoUrls[event.id]
+                                if (!url.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = "Event image",
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .clip(RoundedCornerShape(10.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Spacer(
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    )
                                 }
-                                if (isUpcoming(event.startsAt)) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    OutlinedButton(onClick = { cancelTarget = event }) {
-                                        Text("Cancel event")
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(event.title, style = MaterialTheme.typography.titleMedium)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        formatEventDateNoTime(event.startsAt),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    event.location?.takeIf { it.isNotBlank() }?.let {
+                                        Text(it, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    if (isUpcoming(event.startsAt)) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        OutlinedButton(onClick = { cancelTarget = event }) {
+                                            Text("Cancel event")
+                                        }
                                     }
                                 }
                             }
@@ -213,6 +228,13 @@ fun HostedEventsScreen(
                 }
             }
         }
+
+        OutlinedButton(
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 14.dp)
+        ) { Text("Back") }
     }
 }
 
@@ -249,47 +271,63 @@ private fun EventListScreen(
         loading = false
     }
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
     ) {
-        Text(title, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
-        Spacer(modifier = Modifier.height(10.dp))
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
-        Spacer(modifier = Modifier.height(10.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Text(title, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+            Spacer(modifier = Modifier.height(10.dp))
 
-        if (loading) {
-            Text("Loading...")
-        } else if (events.isEmpty()) {
-            Text("No past events yet.")
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
-                items(events) { event ->
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(event.title, style = MaterialTheme.typography.titleMedium)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(formatEventDateNoTime(event.startsAt), style = MaterialTheme.typography.bodySmall)
-                            event.location?.takeIf { it.isNotBlank() }?.let {
-                                Text(it, style = MaterialTheme.typography.bodySmall)
+            if (loading) {
+                Text("Loading...")
+            } else if (events.isEmpty()) {
+                Text("No past events yet.")
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 84.dp)
+                ) {
+                    items(events) { event ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(event.title, style = MaterialTheme.typography.titleMedium)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(formatEventDateNoTime(event.startsAt), style = MaterialTheme.typography.bodySmall)
+                                event.location?.takeIf { it.isNotBlank() }?.let {
+                                    Text(it, style = MaterialTheme.typography.bodySmall)
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+        OutlinedButton(
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 14.dp)
+        ) { Text("Back") }
     }
 }
 
 @Composable
 fun FriendsScreen(
     onBack: () -> Unit,
+    onOpenProfile: (String) -> Unit = {},
+    onOpenDm: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -298,6 +336,7 @@ fun FriendsScreen(
 
     var loading by remember { mutableStateOf(true) }
     var friends by remember { mutableStateOf<List<FriendListItem>>(emptyList()) }
+    var incomingRequests by remember { mutableStateOf<List<IncomingFriendRequestItem>>(emptyList()) }
 
     suspend fun reload() {
         loading = true
@@ -306,89 +345,198 @@ fun FriendsScreen(
             .onFailure {
                 Toast.makeText(context, it.message ?: "Failed to load friends", Toast.LENGTH_LONG).show()
             }
+        withContext(Dispatchers.IO) { repository.listIncomingFriendRequests() }
+            .onSuccess { incomingRequests = it }
+            .onFailure {
+                Toast.makeText(context, it.message ?: "Failed to load friend requests", Toast.LENGTH_LONG).show()
+            }
         loading = false
     }
 
     LaunchedEffect(Unit) { reload() }
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
     ) {
-        Text("Friends", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
-        Spacer(modifier = Modifier.height(10.dp))
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Back") }
-        Spacer(modifier = Modifier.height(10.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Text("Friends", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+            Spacer(modifier = Modifier.height(10.dp))
 
-        if (loading) {
-            Text("Loading...")
-        } else if (friends.isEmpty()) {
-            Text("No friends yet.")
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
-                items(friends) { friend ->
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        modifier = Modifier.fillMaxWidth()
+                if (loading) {
+                    Text("Loading...")
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 84.dp)
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (friend.avatarUrl.isNullOrBlank()) {
-                                    Spacer(
-                                        modifier = Modifier
-                                            .size(44.dp)
-                                            .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.primary)
-                                    )
-                                } else {
-                                    Image(
-                                        painter = rememberAsyncImagePainter(Uri.parse(friend.avatarUrl)),
-                                        contentDescription = "Friend avatar",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.size(44.dp).clip(CircleShape)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.size(10.dp))
-                                Column {
-                                    Text(friend.fullName, style = MaterialTheme.typography.titleSmall)
-                                    Text("@${friend.username}", style = MaterialTheme.typography.bodySmall)
+                        item {
+                            Text(
+                                "Friend requests",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+                        if (incomingRequests.isEmpty()) {
+                            item { Text("No pending requests.") }
+                        } else {
+                            items(incomingRequests, key = { it.senderId }) { req ->
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onOpenProfile(req.senderId) }
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (req.avatarUrl.isNullOrBlank()) {
+                                                Spacer(
+                                                    modifier = Modifier
+                                                        .size(44.dp)
+                                                        .clip(CircleShape)
+                                                        .background(MaterialTheme.colorScheme.primary)
+                                                )
+                                            } else {
+                                                Image(
+                                                    painter = rememberAsyncImagePainter(Uri.parse(req.avatarUrl)),
+                                                    contentDescription = "Request avatar",
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.size(44.dp).clip(CircleShape)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.size(10.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(req.fullName, style = MaterialTheme.typography.titleSmall)
+                                                Text("@${req.username}", style = MaterialTheme.typography.bodySmall)
+                                            }
+                                            IconButton(onClick = {
+                                                scope.launch {
+                                                    withContext(Dispatchers.IO) {
+                                                        repository.respondToFriendRequest(req.senderId, accept = true)
+                                                    }.onSuccess {
+                                                        Toast.makeText(context, "Request accepted", Toast.LENGTH_SHORT).show()
+                                                        reload()
+                                                    }.onFailure {
+                                                        Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            }) {
+                                                Icon(Icons.Filled.Check, contentDescription = "Accept request")
+                                            }
+                                            IconButton(onClick = {
+                                                scope.launch {
+                                                    withContext(Dispatchers.IO) {
+                                                        repository.respondToFriendRequest(req.senderId, accept = false)
+                                                    }.onSuccess {
+                                                        Toast.makeText(context, "Request declined", Toast.LENGTH_SHORT).show()
+                                                        reload()
+                                                    }.onFailure {
+                                                        Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            }) {
+                                                Icon(Icons.Filled.Close, contentDescription = "Decline request")
+                                            }
+                                        }
+                                    }
                                 }
                             }
+                        }
+
+                        item {
                             Spacer(modifier = Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = {
-                                    scope.launch {
-                                        withContext(Dispatchers.IO) { repository.unfriend(friend.id) }
-                                            .onSuccess {
-                                                Toast.makeText(context, "Friend removed", Toast.LENGTH_SHORT).show()
-                                                reload()
+                            Text(
+                                "Friends",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+                        if (friends.isEmpty()) {
+                            item { Text("No friends yet.") }
+                        } else {
+                            items(friends) { friend ->
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onOpenProfile(friend.id) }
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (friend.avatarUrl.isNullOrBlank()) {
+                                                Spacer(
+                                                    modifier = Modifier
+                                                        .size(44.dp)
+                                                        .clip(CircleShape)
+                                                        .background(MaterialTheme.colorScheme.primary)
+                                                )
+                                            } else {
+                                                Image(
+                                                    painter = rememberAsyncImagePainter(Uri.parse(friend.avatarUrl)),
+                                                    contentDescription = "Friend avatar",
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.size(44.dp).clip(CircleShape)
+                                                )
                                             }
-                                            .onFailure {
-                                                Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                                            Spacer(modifier = Modifier.size(10.dp))
+                                            Column {
+                                                Text(friend.fullName, style = MaterialTheme.typography.titleSmall)
+                                                Text("@${friend.username}", style = MaterialTheme.typography.bodySmall)
                                             }
+                                        }
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            OutlinedButton(onClick = { onOpenDm(friend.id) }) { Text("Message") }
+                                            OutlinedButton(onClick = {
+                                                scope.launch {
+                                                    withContext(Dispatchers.IO) { repository.unfriend(friend.id) }
+                                                        .onSuccess {
+                                                            Toast.makeText(context, "Friend removed", Toast.LENGTH_SHORT).show()
+                                                            reload()
+                                                        }
+                                                        .onFailure {
+                                                            Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                }
+                                            }) { Text("Unfriend") }
+                                            Button(onClick = {
+                                                scope.launch {
+                                                    withContext(Dispatchers.IO) { repository.blockUser(friend.id) }
+                                                        .onSuccess {
+                                                            Toast.makeText(context, "User blocked", Toast.LENGTH_SHORT).show()
+                                                            reload()
+                                                        }
+                                                        .onFailure {
+                                                            Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                }
+                                            }) { Text("Block") }
+                                        }
                                     }
-                                }) { Text("Unfriend") }
-                                Button(onClick = {
-                                    scope.launch {
-                                        withContext(Dispatchers.IO) { repository.blockUser(friend.id) }
-                                            .onSuccess {
-                                                Toast.makeText(context, "User blocked", Toast.LENGTH_SHORT).show()
-                                                reload()
-                                            }
-                                            .onFailure {
-                                                Toast.makeText(context, it.message ?: "Failed", Toast.LENGTH_SHORT).show()
-                                            }
-                                    }
-                                }) { Text("Block") }
+                                }
                             }
                         }
                     }
                 }
             }
-        }
+
+        OutlinedButton(
+            onClick = onBack,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+                .align(Alignment.BottomCenter)
+        ) { Text("Back") }
     }
 }
 

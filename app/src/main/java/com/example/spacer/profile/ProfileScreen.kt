@@ -7,7 +7,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +26,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -37,7 +43,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.NavHostController
@@ -48,6 +56,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun ProfileScreen(
     navController: NavHostController,
@@ -56,6 +65,8 @@ fun ProfileScreen(
     onOpenHostedEvents: () -> Unit,
     onOpenAttendedEvents: () -> Unit,
     onOpenFriends: () -> Unit,
+    onOpenMessages: () -> Unit,
+    onOpenAvailability: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -63,6 +74,12 @@ fun ProfileScreen(
     val repository = remember { ProfileRepository() }
     val sessionPrefs = remember { SessionPrefs(context) }
     val scrollState = rememberScrollState()
+    val screenWidth = LocalConfiguration.current.screenWidthDp
+    val avatarSize = when {
+        screenWidth < 360 -> 78.dp
+        screenWidth > 420 -> 104.dp
+        else -> 92.dp
+    }
 
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -74,6 +91,21 @@ fun ProfileScreen(
     var hostedCount by remember { mutableStateOf(0) }
     var attendedCount by remember { mutableStateOf(0) }
     var friendsCount by remember { mutableStateOf(0) }
+    var presenceStatus by remember { mutableStateOf(PresenceStatus.fromDb(sessionPrefs.getPresenceStatus())) }
+    var showPresenceMenu by remember { mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    fun loadFromCache() {
+        val cachedName = sessionPrefs.getProfileName().trim()
+        if (username.isBlank() && fullName.isBlank()) {
+            fullName = cachedName
+            username = cachedName
+        }
+        avatarUrl = avatarUrl ?: sessionPrefs.getProfileImageUri()
+        hostedCount = sessionPrefs.getHostedCount()
+        attendedCount = sessionPrefs.getAttendedCount()
+        friendsCount = sessionPrefs.getFriendsCount()
+    }
 
     fun loadFromCache() {
         val cachedName = sessionPrefs.getProfileName().trim()
@@ -93,22 +125,26 @@ fun ProfileScreen(
         val result = withContext(Dispatchers.IO) { repository.load() }
         result
             .onSuccess { snapshot ->
+                val cachedAvatar = sessionPrefs.getProfileImageUri()
+                val resolvedAvatar = snapshot.profile.avatarUrl?.takeIf { it.isNotBlank() } ?: cachedAvatar
                 fullName = snapshot.profile.fullName.orEmpty()
                 username = snapshot.profile.username.orEmpty()
                 email = snapshot.profile.email.orEmpty()
-                avatarUrl = snapshot.profile.avatarUrl
+                avatarUrl = resolvedAvatar
 
                 hostedCount = snapshot.stats.hostedCount
                 attendedCount = snapshot.stats.attendedCount
                 friendsCount = snapshot.stats.friendsCount
+                presenceStatus = PresenceStatus.fromDb(snapshot.profile.presenceStatus)
                 val label = displayLabelFromProfile(snapshot.profile)
                 if (label.isNotBlank()) {
                     sessionPrefs.saveProfileName(label)
                 }
+                sessionPrefs.savePresenceStatus(presenceStatus.dbValue)
                 sessionPrefs.saveProfileSnapshot(
                     profileName = label.ifBlank { username.ifBlank { fullName } },
                     aboutMe = snapshot.profile.aboutMe.orEmpty(),
-                    profileImageUri = avatarUrl,
+                    profileImageUri = resolvedAvatar,
                     hostedCount = hostedCount,
                     attendedCount = attendedCount,
                     friendsCount = friendsCount
@@ -136,60 +172,140 @@ fun ProfileScreen(
         onDispose { navController.removeOnDestinationChangedListener(listener) }
     }
 
-    Column(
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = isRefreshing,
+        onRefresh = {
+            scope.launch {
+                isRefreshing = true
+                loadProfile()
+                isRefreshing = false
+            }
+        }
+    )
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.Top
+            .pullRefresh(pullRefreshState)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.Top
         ) {
-            Text(
-                text = "Profile",
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Profile",
+            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(14.dp))
 
         Surface(
-            shape = RoundedCornerShape(26.dp),
-            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
-                modifier = Modifier.padding(18.dp),
+                modifier = Modifier.padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val selectedImageUri = avatarUrl
 
                 if (selectedImageUri.isNullOrBlank()) {
-                    Spacer(
+                    Box(
                         modifier = Modifier
-                            .size(92.dp)
+                            .size(avatarSize)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primary)
                             .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                    )
+                            .clickable { showPresenceMenu = true }
+                    ) {
+                        PresenceDot(
+                            status = presenceStatus,
+                            modifier = Modifier.align(Alignment.BottomEnd)
+                        )
+                    }
                 } else {
-                    Image(
-                        painter = rememberAsyncImagePainter(model = Uri.parse(selectedImageUri)),
-                        contentDescription = "Profile picture",
-                        contentScale = ContentScale.Crop,
+                    Box(
                         modifier = Modifier
-                            .size(92.dp)
-                            .clip(CircleShape)
-                            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                    )
+                            .size(avatarSize)
+                            .clickable { showPresenceMenu = true }
+                    ) {
+                        Image(
+                            painter = rememberAsyncImagePainter(model = Uri.parse(selectedImageUri)),
+                            contentDescription = "Profile picture",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(avatarSize)
+                                .clip(CircleShape)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                        )
+                        PresenceDot(
+                            status = presenceStatus,
+                            modifier = Modifier.align(Alignment.BottomEnd)
+                        )
+                    }
+                }
+                if (showPresenceMenu) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        tonalElevation = 4.dp,
+                        modifier = Modifier
+                            .offset(y = 8.dp)
+                            .fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                "Set status",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            )
+                            PresenceStatus.entries.forEach { option ->
+                                val selected = option == presenceStatus
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                            else androidx.compose.ui.graphics.Color.Transparent
+                                        )
+                                        .clickable {
+                                            showPresenceMenu = false
+                                            if (option == presenceStatus) return@clickable
+                                            scope.launch {
+                                                withContext(Dispatchers.IO) { repository.updatePresenceStatus(option) }
+                                                    .onSuccess {
+                                                        presenceStatus = option
+                                                        sessionPrefs.savePresenceStatus(option.dbValue)
+                                                    }
+                                                    .onFailure {
+                                                        Toast.makeText(context, "Couldn't update status right now.", Toast.LENGTH_SHORT).show()
+                                                    }
+                                            }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    PresenceDot(status = option, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.size(8.dp))
+                                    Text(
+                                        option.label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-                // Primary headline: signup username (handle), not the optional "Name" field.
                 val displayName = when {
                     isLoading -> ""
                     username.trim().isNotEmpty() -> username.trim()
@@ -198,7 +314,6 @@ fun ProfileScreen(
                     else -> ""
                 }
                 val accountLabel = email.trim().takeIf { it.isNotEmpty() }?.substringBefore("@")
-                // Second line only if they set a different display name (e.g. in Edit profile).
                 val subtitle = when {
                     isLoading -> ""
                     username.isBlank() -> ""
@@ -212,7 +327,9 @@ fun ProfileScreen(
                     } else {
                         displayName.ifBlank { accountLabel ?: "Account" }
                     },
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 if (subtitle.isNotBlank()) {
                     Text(
@@ -220,6 +337,24 @@ fun ProfileScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
                     )
+                }
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(top = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        PresenceDot(status = presenceStatus, modifier = Modifier.size(10.dp))
+                        Text(
+                            text = presenceStatus.label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                        )
+                    }
                 }
             }
         }
@@ -251,16 +386,51 @@ fun ProfileScreen(
         }
 
         Spacer(modifier = Modifier.height(14.dp))
-        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            "Account",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(vertical = 8.dp)) {
                 MenuRow("Edit Profile", onClick = onOpenEditProfile)
                 MenuRow("Settings", onClick = onOpenSettings)
+                MenuRow("Availability", onClick = onOpenAvailability)
+                MenuRow("Messages", onClick = onOpenMessages)
                 MenuRow("Change Password")
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        Text(
+            "Support",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(vertical = 8.dp)) {
                 MenuRow("Help & Support")
             }
         }
+        }
+        PullRefreshIndicator(
+            refreshing = isRefreshing,
+            state = pullRefreshState,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
     }
+}
+
+@Composable
+private fun PresenceDot(status: PresenceStatus, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(16.dp)
+            .clip(CircleShape)
+            .background(status.dotColor)
+            .border(1.dp, MaterialTheme.colorScheme.surface, CircleShape)
+    )
 }
 
 @Composable
@@ -272,7 +442,7 @@ private fun ProfileStatCard(
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
         modifier = modifier.clickable { onClick() }
     ) {
         Column(

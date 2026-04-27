@@ -1,6 +1,8 @@
 package com.example.spacer.profile
 
 import android.net.Uri
+import android.content.Intent
+import android.graphics.BitmapFactory
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -8,8 +10,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,12 +43,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import com.example.spacer.network.SessionPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 
 @Composable
 fun EditProfileScreen(
@@ -80,7 +86,8 @@ fun EditProfileScreen(
                 aboutMe = it.profile.aboutMe.orEmpty()
                 username = it.profile.username.orEmpty()
                 email = it.profile.email.orEmpty()
-                avatarUrl = it.profile.avatarUrl
+                avatarUrl = it.profile.avatarUrl?.takeIf { url -> url.isNotBlank() }
+                    ?: sessionPrefs.getProfileImageUri()
             }
             .onFailure {
                 Toast.makeText(context, it.message ?: "Failed to load profile", Toast.LENGTH_LONG).show()
@@ -90,10 +97,18 @@ fun EditProfileScreen(
     }
 
     val imagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { selectedUri ->
-        avatarUrl = selectedUri?.toString()
-        sessionPrefs.saveProfileImageUri(avatarUrl)
+        selectedUri?.let { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            avatarUrl = uri.toString()
+            sessionPrefs.saveProfileImageUri(avatarUrl)
+        }
     }
 
     Column(
@@ -103,30 +118,36 @@ fun EditProfileScreen(
             .background(MaterialTheme.colorScheme.background)
             .padding(16.dp)
     ) {
-        Text(
-            text = "Edit Profile",
-            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-
         Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Text(
+                    text = "Edit profile",
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
                 if (avatarUrl.isNullOrBlank()) {
-                    Spacer(
+                    Box(
                         modifier = Modifier
                             .size(90.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primary)
                             .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                            .clickable { imagePicker.launch("image/*") }
-                    )
+                            .clickable { imagePicker.launch(arrayOf("image/*")) }
+                    ) {
+                        Text(
+                            text = (fullName.firstOrNull()?.uppercase() ?: "U"),
+                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
                 } else {
                     Image(
                         painter = rememberAsyncImagePainter(Uri.parse(avatarUrl)),
@@ -136,15 +157,21 @@ fun EditProfileScreen(
                             .size(90.dp)
                             .clip(CircleShape)
                             .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                            .clickable { imagePicker.launch("image/*") }
+                            .clickable { imagePicker.launch(arrayOf("image/*")) }
                     )
                 }
+                Text(
+                    "Tap to change photo",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
 
                 Spacer(modifier = Modifier.height(14.dp))
                 OutlinedTextField(
                     value = fullName,
                     onValueChange = { fullName = it },
-                    label = { Text("Full name") },
+                    label = { Text("FULL NAME") },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !loading
                 )
@@ -152,7 +179,7 @@ fun EditProfileScreen(
                 OutlinedTextField(
                     value = aboutMe,
                     onValueChange = { aboutMe = it },
-                    label = { Text("About me") },
+                    label = { Text("ABOUT ME") },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !loading
                 )
@@ -160,55 +187,84 @@ fun EditProfileScreen(
                 OutlinedTextField(
                     value = email,
                     onValueChange = {},
-                    label = { Text("Email") },
+                    label = { Text("EMAIL") },
                     enabled = false,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedTextField(
-                    value = username,
+                    value = "@ $username",
                     onValueChange = {},
-                    label = { Text("Username") },
+                    label = { Text("USERNAME") },
                     enabled = false,
                     modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val resolvedAvatarUrl = withContext(Dispatchers.IO) {
+                                when {
+                                    avatarUrl.isNullOrBlank() -> null
+                                    avatarUrl!!.startsWith("content://") -> {
+                                        val bytes = contentUriToJpegBytes(context, avatarUrl!!)
+                                        if (bytes == null) return@withContext avatarUrl
+                                        repository.uploadProfileAvatarJpeg(bytes).getOrElse { error ->
+                                            throw IllegalStateException(error.message ?: "Failed to upload profile photo")
+                                        }
+                                    }
+                                    else -> avatarUrl
+                                }
+                            }
+                            val profileResult = withContext(Dispatchers.IO) {
+                                repository.updateProfile(
+                                    fullName = fullName.trim(),
+                                    aboutMe = aboutMe.trim()
+                                )
+                            }
+                            val avatarResult = withContext(Dispatchers.IO) {
+                                repository.updateAvatarUrl(resolvedAvatarUrl)
+                            }
+                            if (profileResult.isSuccess && avatarResult.isSuccess) {
+                                val label = fullName.trim().ifBlank {
+                                    username.trim().ifBlank { email.trim().substringBefore("@") }
+                                }
+                                if (label.isNotBlank()) {
+                                    sessionPrefs.saveProfileName(label)
+                                }
+                                sessionPrefs.saveAboutMe(aboutMe.trim())
+                                sessionPrefs.saveProfileImageUri(resolvedAvatarUrl)
+                                Toast.makeText(context, "Profile saved", Toast.LENGTH_SHORT).show()
+                                onBack()
+                            } else {
+                                val err = profileResult.exceptionOrNull()?.message
+                                    ?: avatarResult.exceptionOrNull()?.message
+                                    ?: "Failed to save profile"
+                                Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading
+                ) { Text("Save changes") }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+                    Text("Cancel")
+                }
             }
         }
-
-        Spacer(modifier = Modifier.height(14.dp))
-        Button(
-            onClick = {
-                scope.launch {
-                    withContext(Dispatchers.IO) {
-                        repository.updateProfile(
-                            fullName = fullName.trim(),
-                            aboutMe = aboutMe.trim()
-                        )
-                    }.onSuccess {
-                        val label = fullName.trim().ifBlank {
-                            username.trim().ifBlank { email.trim().substringBefore("@") }
-                        }
-                        if (label.isNotBlank()) {
-                            sessionPrefs.saveProfileName(label)
-                        }
-                        sessionPrefs.saveAboutMe(aboutMe.trim())
-                        sessionPrefs.saveProfileImageUri(avatarUrl)
-                        Toast.makeText(context, "Profile saved", Toast.LENGTH_SHORT).show()
-                        onBack()
-                    }.onFailure {
-                        Toast.makeText(context, it.message ?: "Failed to save profile", Toast.LENGTH_LONG).show()
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !loading
-        ) {
-            Text("Save")
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-            Text("Cancel")
-        }
     }
+}
+
+private fun contentUriToJpegBytes(context: android.content.Context, uriString: String): ByteArray? {
+    return runCatching {
+        val uri = Uri.parse(uriString)
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val bitmap = BitmapFactory.decodeStream(input) ?: return@runCatching null
+            val out = ByteArrayOutputStream()
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out)
+            out.toByteArray()
+        }
+    }.getOrNull()
 }
 

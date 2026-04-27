@@ -1,10 +1,14 @@
 package com.example.spacer.profile
 
+import com.example.spacer.BuildConfig
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.storage.storage
+import io.ktor.http.ContentType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import com.example.spacer.events.NotificationsRepository
 import com.example.spacer.network.SupabaseManager
 import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
@@ -20,7 +24,9 @@ data class ProfileRow(
     @SerialName("avatar_url")
     val avatarUrl: String? = null,
     @SerialName("about_me")
-    val aboutMe: String? = null
+    val aboutMe: String? = null,
+    @SerialName("presence_status")
+    val presenceStatus: String? = null
 )
 
 @Serializable
@@ -48,7 +54,9 @@ data class SearchUserRow(
     @SerialName("name")
     val fullName: String? = null,
     @SerialName("avatar_url")
-    val avatarUrl: String? = null
+    val avatarUrl: String? = null,
+    @SerialName("presence_status")
+    val presenceStatus: String? = null
 )
 
 @Serializable
@@ -63,6 +71,8 @@ data class EventRow(
     @SerialName("ends_at")
     val endsAt: String? = null,
     val location: String? = null,
+    @SerialName("bring_items")
+    val bringItems: String? = null,
     /** [public] listed in discovery; [invite_only] friends / invited only. */
     val visibility: String? = null,
     val category: String? = null
@@ -79,19 +89,51 @@ data class FriendListItem(
     val id: String,
     val fullName: String,
     val username: String,
+    val avatarUrl: String?,
+    val presenceStatus: String? = "offline"
+)
+
+data class IncomingFriendRequestItem(
+    val senderId: String,
+    val fullName: String,
+    val username: String,
     val avatarUrl: String?
 )
+
+data class BlockedUserItem(
+    val userId: String,
+    val fullName: String,
+    val username: String,
+    val avatarUrl: String?,
+    val presenceStatus: String? = "offline"
+)
+
+enum class FriendshipState {
+    NONE,
+    OUTGOING_PENDING,
+    INCOMING_PENDING,
+    ACCEPTED
+}
 
 data class PublicProfileSnapshot(
     val id: String,
     val fullName: String,
     val username: String,
     val avatarUrl: String?,
+    val presenceStatus: String? = "offline",
     val aboutMe: String,
     val hostedEvents: List<EventRow>,
     val attendedEvents: List<EventRow>,
     val friends: List<FriendListItem>
 )
+
+fun ProfileRow.displayName(fallback: String = "User"): String {
+    return fullName?.ifBlank { username ?: fallback } ?: (username ?: fallback)
+}
+
+fun SearchUserRow.displayName(fallback: String = "User"): String {
+    return fullName?.ifBlank { username ?: fallback } ?: (username ?: fallback)
+}
 
 @Serializable
 private data class FriendRequestInsert(
@@ -349,10 +391,101 @@ private object DemoProfileDetailsDirectory {
 
 class ProfileRepository {
     private val supabase = SupabaseManager.client
+    private val notificationsRepo = NotificationsRepository()
 
     companion object {
-        fun isOfflineDemoProfile(id: String): Boolean =
-            FindPeopleDemoDirectory.isDemoId(id) || DemoProfileDetailsDirectory.isDemoId(id)
+        fun isOfflineDemoProfile(_id: String): Boolean {
+            return false
+        }
+    }
+
+    private object Cache {
+        private const val TTL_MS = 2 * 60 * 1000L
+        private val friendsByUser = mutableMapOf<String, Pair<Long, List<FriendListItem>>>()
+        private val publicProfilesByUser = mutableMapOf<String, Pair<Long, PublicProfileSnapshot>>()
+
+        fun getFriends(userId: String): List<FriendListItem>? {
+            val cached = friendsByUser[userId] ?: return null
+            if (System.currentTimeMillis() - cached.first > TTL_MS) return null
+            return cached.second
+        }
+
+        fun putFriends(userId: String, list: List<FriendListItem>) {
+            friendsByUser[userId] = System.currentTimeMillis() to list
+        }
+
+        fun getPublicProfile(userId: String): PublicProfileSnapshot? {
+            val cached = publicProfilesByUser[userId] ?: return null
+            if (System.currentTimeMillis() - cached.first > TTL_MS) return null
+            return cached.second
+        }
+
+        fun putPublicProfile(userId: String, snapshot: PublicProfileSnapshot) {
+            publicProfilesByUser[userId] = System.currentTimeMillis() to snapshot
+        }
+
+        fun clearFriendsFor(userId: String) {
+            friendsByUser.remove(userId)
+        }
+
+        fun clearPublicProfileFor(userId: String) {
+            publicProfilesByUser.remove(userId)
+        }
+    }
+
+    @Serializable
+    private data class UserBlockRow(
+        @SerialName("blocker_id")
+        val blockerId: String,
+        @SerialName("blocked_id")
+        val blockedId: String
+    )
+
+    private suspend fun blockedUserIdsFor(userId: String): Set<String> {
+        val blockedByMe = runCatching {
+            supabase.from("user_blocks")
+                .select {
+                    filter { eq("blocker_id", userId) }
+                }
+                .decodeList<UserBlockRow>()
+                .map { it.blockedId }
+        }.getOrDefault(emptyList())
+        val blockedMe = runCatching {
+            supabase.from("user_blocks")
+                .select {
+                    filter { eq("blocked_id", userId) }
+                }
+                .decodeList<UserBlockRow>()
+                .map { it.blockerId }
+        }.getOrDefault(emptyList())
+        return (blockedByMe + blockedMe).toSet()
+    }
+
+    private suspend fun isBlockedRelationship(userId: String, otherUserId: String): Boolean {
+        val blocksByMe = runCatching {
+            supabase.from("user_blocks")
+                .select {
+                    filter {
+                        eq("blocker_id", userId)
+                        eq("blocked_id", otherUserId)
+                    }
+                    limit(1)
+                }
+                .decodeList<UserBlockRow>()
+        }.getOrDefault(emptyList())
+        if (blocksByMe.isNotEmpty()) return true
+        val blocksMe = runCatching {
+            supabase.from("user_blocks")
+                .select {
+                    filter {
+                        eq("blocker_id", otherUserId)
+                        eq("blocked_id", userId)
+                    }
+                    limit(1)
+                }
+                .decodeList<UserBlockRow>()
+        }.getOrDefault(emptyList())
+        return blocksMe.isNotEmpty()
     }
 
     private fun parseDateSafely(value: String): OffsetDateTime? {
@@ -515,6 +648,75 @@ class ProfileRepository {
         }
     }
 
+    suspend fun updateAvatarUrl(avatarUrl: String?): Result<Unit> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            supabase.from("profiles")
+                .update(
+                    {
+                        set("avatar_url", avatarUrl?.trim()?.ifBlank { null })
+                    }
+                ) {
+                    filter { eq("id", user.id) }
+                }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun uploadProfileAvatarJpeg(imageBytes: ByteArray): Result<String> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            if (imageBytes.isEmpty()) {
+                return Result.failure(IllegalArgumentException("Image data is empty"))
+            }
+            val objectPath = "avatars/${user.id}.jpg"
+            supabase.storage.from("Profile_photos").upload(
+                path = objectPath,
+                data = imageBytes
+            ) {
+                upsert = true
+                contentType = ContentType.Image.JPEG
+            }
+            val publicUrl = "${BuildConfig.SUPABASE_URL}/storage/v1/object/public/Profile_photos/$objectPath"
+            Result.success(publicUrl)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updatePresenceStatus(status: PresenceStatus): Result<Unit> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            supabase.from("profiles")
+                .update(
+                    {
+                        set("presence_status", status.dbValue)
+                        set("presence_updated_at", OffsetDateTime.now().toString())
+                    }
+                ) {
+                    filter { eq("id", user.id) }
+                }
+            Cache.clearPublicProfileFor(user.id)
+            Cache.clearFriendsFor(user.id)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun isNonFatalSocialMutation(message: String?): Boolean {
+        val m = message?.lowercase() ?: return false
+        return m.contains("duplicate") ||
+            m.contains("already exists") ||
+            m.contains("conflict") ||
+            m.contains("23505")
+    }
+
     suspend fun searchUsers(query: String): Result<List<SearchUserRow>> {
         return try {
             val user = supabase.auth.currentUserOrNull()
@@ -578,9 +780,9 @@ class ProfileRepository {
                 }.take(40)
             }
 
-            val demo = FindPeopleDemoDirectory.matches(safe)
-            val out = (merged + demo).distinctBy { it.id }.take(40)
-            Result.success(out)
+            val out = merged.take(40)
+            val blockedIds = blockedUserIdsFor(user.id)
+            Result.success(out.filterNot { it.id in blockedIds })
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -593,7 +795,91 @@ class ProfileRepository {
             if (targetUserId == user.id) {
                 return Result.failure(IllegalArgumentException("You can't add yourself"))
             }
-            if (isOfflineDemoProfile(targetUserId)) {
+
+            val outgoing = runCatching {
+                supabase.from("friend_requests")
+                    .select {
+                        filter {
+                            eq("sender_id", user.id)
+                            eq("receiver_id", targetUserId)
+                        }
+                        limit(1)
+                    }
+                    .decodeList<FriendRequestInsert>()
+                    .firstOrNull()
+            }.getOrNull()
+            if (outgoing?.status == "accepted" || outgoing?.status == "pending") {
+                return Result.success(Unit)
+            }
+            if (outgoing?.status == "declined") {
+                supabase.from("friend_requests").update(
+                    {
+                        set("status", "pending")
+                        set("responded_at", null as String?)
+                    }
+                ) {
+                    filter {
+                        eq("sender_id", user.id)
+                        eq("receiver_id", targetUserId)
+                    }
+                }
+                runCatching {
+                    val sender = supabase.from("profiles")
+                        .select {
+                            filter { eq("id", user.id) }
+                            limit(1)
+                        }
+                        .decodeSingle<ProfileRow>()
+                    val senderLabel = sender.fullName?.ifBlank { null } ?: sender.username ?: "Someone"
+                    notificationsRepo.createForUser(
+                        userId = targetUserId,
+                        title = "New friend request",
+                        body = "$senderLabel sent you a friend request.",
+                        deepLink = NotificationsRepository.DeepLinks.socialRequests()
+                    )
+                }
+                Cache.clearFriendsFor(user.id)
+                Cache.clearPublicProfileFor(targetUserId)
+                return Result.success(Unit)
+            }
+
+            val incoming = runCatching {
+                supabase.from("friend_requests")
+                    .select {
+                        filter {
+                            eq("sender_id", targetUserId)
+                            eq("receiver_id", user.id)
+                        }
+                        limit(1)
+                    }
+                    .decodeList<FriendRequestInsert>()
+                    .firstOrNull()
+            }.getOrNull()
+
+            if (incoming?.status == "accepted") {
+                return Result.success(Unit)
+            }
+            if (incoming?.status == "pending") {
+                supabase.from("friend_requests").update(
+                    {
+                        set("status", "accepted")
+                    }
+                ) {
+                    filter {
+                        eq("sender_id", targetUserId)
+                        eq("receiver_id", user.id)
+                    }
+                }
+                runCatching {
+                    notificationsRepo.createForUser(
+                        userId = targetUserId,
+                        title = "Friend request accepted",
+                        body = "Your friend request was accepted.",
+                        deepLink = NotificationsRepository.DeepLinks.publicProfile(user.id)
+                    )
+                }
+                Cache.clearFriendsFor(user.id)
+                Cache.clearPublicProfileFor(targetUserId)
                 return Result.success(Unit)
             }
 
@@ -603,6 +889,146 @@ class ProfileRepository {
                     receiverId = targetUserId
                 )
             )
+            runCatching {
+                val sender = supabase.from("profiles")
+                    .select {
+                        filter { eq("id", user.id) }
+                        limit(1)
+                    }
+                    .decodeSingle<ProfileRow>()
+                val senderLabel = sender.fullName?.ifBlank { null } ?: sender.username ?: "Someone"
+                notificationsRepo.createForUser(
+                    userId = targetUserId,
+                    title = "New friend request",
+                    body = "$senderLabel sent you a friend request.",
+                    deepLink = NotificationsRepository.DeepLinks.socialRequests()
+                )
+            }
+            Cache.clearFriendsFor(user.id)
+            Cache.clearPublicProfileFor(targetUserId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            if (isNonFatalSocialMutation(e.message)) Result.success(Unit) else Result.failure(e)
+        }
+    }
+
+    suspend fun getFriendshipStates(targetUserIds: List<String>): Result<Map<String, FriendshipState>> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            if (targetUserIds.isEmpty()) return Result.success(emptyMap())
+
+            val normalized = targetUserIds.distinct().toSet()
+            val outgoing = supabase.from("friend_requests")
+                .select {
+                    filter { eq("sender_id", user.id) }
+                }
+                .decodeList<FriendRequestInsert>()
+                .filter { it.receiverId in normalized }
+
+            val incoming = supabase.from("friend_requests")
+                .select {
+                    filter { eq("receiver_id", user.id) }
+                }
+                .decodeList<FriendRequestInsert>()
+                .filter { it.senderId in normalized }
+
+            val map = mutableMapOf<String, FriendshipState>()
+            normalized.forEach { id -> map[id] = FriendshipState.NONE }
+            val blockedIds = blockedUserIdsFor(user.id)
+            outgoing.forEach {
+                if (it.receiverId in blockedIds) return@forEach
+                map[it.receiverId] = when (it.status) {
+                    "accepted" -> FriendshipState.ACCEPTED
+                    "pending" -> FriendshipState.OUTGOING_PENDING
+                    else -> map[it.receiverId] ?: FriendshipState.NONE
+                }
+            }
+            incoming.forEach {
+                if (it.senderId in blockedIds) return@forEach
+                map[it.senderId] = when (it.status) {
+                    "accepted" -> FriendshipState.ACCEPTED
+                    "pending" -> FriendshipState.INCOMING_PENDING
+                    else -> map[it.senderId] ?: FriendshipState.NONE
+                }
+            }
+            Result.success(map)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun listIncomingFriendRequests(): Result<List<IncomingFriendRequestItem>> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            val incoming = supabase.from("friend_requests")
+                .select {
+                    filter {
+                        eq("receiver_id", user.id)
+                        eq("status", "pending")
+                    }
+                }
+                .decodeList<FriendRequestInsert>()
+            val blockedIds = blockedUserIdsFor(user.id)
+
+            val rows = incoming.mapNotNull { req ->
+                if (req.senderId in blockedIds) return@mapNotNull null
+                runCatching {
+                    val p = supabase.from("profiles")
+                        .select {
+                            filter { eq("id", req.senderId) }
+                            limit(1)
+                        }
+                        .decodeSingle<ProfileRow>()
+                    IncomingFriendRequestItem(
+                        senderId = req.senderId,
+                        fullName = p.displayName(),
+                        username = p.username ?: "user",
+                        avatarUrl = p.avatarUrl
+                    )
+                }.getOrNull()
+            }.sortedBy { it.fullName.lowercase() }
+            Result.success(rows)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun respondToFriendRequest(senderId: String, accept: Boolean): Result<Unit> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            if (accept) {
+                supabase.from("friend_requests").update(
+                    {
+                        set("status", "accepted")
+                    }
+                ) {
+                    filter {
+                        eq("sender_id", senderId)
+                        eq("receiver_id", user.id)
+                        eq("status", "pending")
+                    }
+                }
+                runCatching {
+                    notificationsRepo.createForUser(
+                        userId = senderId,
+                        title = "Friend request accepted",
+                        body = "Your friend request was accepted.",
+                        deepLink = NotificationsRepository.DeepLinks.publicProfile(user.id)
+                    )
+                }
+            } else {
+                supabase.from("friend_requests").delete {
+                    filter {
+                        eq("sender_id", senderId)
+                        eq("receiver_id", user.id)
+                        eq("status", "pending")
+                    }
+                }
+            }
+            Cache.clearFriendsFor(user.id)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -616,16 +1042,77 @@ class ProfileRepository {
             if (targetUserId == user.id) {
                 return Result.failure(IllegalArgumentException("You can't block yourself"))
             }
-            if (isOfflineDemoProfile(targetUserId)) {
-                return Result.success(Unit)
-            }
-
             supabase.from("user_blocks").insert(
                 UserBlockInsert(
                     blockerId = user.id,
                     blockedId = targetUserId
                 )
             )
+            // Ensure block immediately takes effect in friends/profile caches and remove relationship.
+            supabase.from("friend_requests").delete {
+                filter {
+                    eq("sender_id", user.id)
+                    eq("receiver_id", targetUserId)
+                }
+            }
+            supabase.from("friend_requests").delete {
+                filter {
+                    eq("sender_id", targetUserId)
+                    eq("receiver_id", user.id)
+                }
+            }
+            Cache.clearFriendsFor(user.id)
+            Cache.clearPublicProfileFor(targetUserId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            if (isNonFatalSocialMutation(e.message)) Result.success(Unit) else Result.failure(e)
+        }
+    }
+
+    suspend fun listBlockedUsers(): Result<List<BlockedUserItem>> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            val blocked = supabase.from("user_blocks")
+                .select {
+                    filter { eq("blocker_id", user.id) }
+                }
+                .decodeList<UserBlockRow>()
+            val out = blocked.mapNotNull { row ->
+                runCatching {
+                    val p = supabase.from("profiles")
+                        .select {
+                            filter { eq("id", row.blockedId) }
+                            limit(1)
+                        }
+                        .decodeSingle<ProfileRow>()
+                    BlockedUserItem(
+                        userId = p.id,
+                        fullName = p.displayName(),
+                        username = p.username ?: "user",
+                        avatarUrl = p.avatarUrl,
+                        presenceStatus = p.presenceStatus
+                    )
+                }.getOrNull()
+            }.sortedBy { it.fullName.lowercase() }
+            Result.success(out)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun unblockUser(targetUserId: String): Result<Unit> {
+        return try {
+            val user = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            supabase.from("user_blocks").delete {
+                filter {
+                    eq("blocker_id", user.id)
+                    eq("blocked_id", targetUserId)
+                }
+            }
+            Cache.clearFriendsFor(user.id)
+            Cache.clearPublicProfileFor(targetUserId)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -643,10 +1130,6 @@ class ProfileRepository {
             if (targetUserId == user.id) {
                 return Result.failure(IllegalArgumentException("You can't report yourself"))
             }
-            if (isOfflineDemoProfile(targetUserId)) {
-                return Result.success(Unit)
-            }
-
             supabase.from("user_reports").insert(
                 UserReportInsert(
                     reporterId = user.id,
@@ -656,7 +1139,7 @@ class ProfileRepository {
             )
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(e)
+            if (isNonFatalSocialMutation(e.message)) Result.success(Unit) else Result.failure(e)
         }
     }
 
@@ -711,6 +1194,9 @@ class ProfileRepository {
         return try {
             val user = supabase.auth.currentUserOrNull()
                 ?: return Result.failure(IllegalStateException("Not logged in"))
+            Cache.getFriends(user.id)?.let { cached ->
+                return Result.success(cached)
+            }
 
             val outgoing = supabase.from("friend_requests")
                 .select {
@@ -733,7 +1219,9 @@ class ProfileRepository {
                 .map { it.senderId }
 
             val friendIds = (outgoing + incoming).distinct()
+            val blockedIds = blockedUserIdsFor(user.id)
             val friends = friendIds.mapNotNull { id ->
+                if (id in blockedIds) return@mapNotNull null
                 runCatching {
                     val p = supabase.from("profiles")
                         .select {
@@ -743,25 +1231,33 @@ class ProfileRepository {
                         .decodeSingle<ProfileRow>()
                     FriendListItem(
                         id = p.id,
-                        fullName = p.fullName?.ifBlank { p.username ?: "User" } ?: (p.username ?: "User"),
+                        fullName = p.displayName(),
                         username = p.username ?: "user",
-                        avatarUrl = p.avatarUrl
+                        avatarUrl = p.avatarUrl,
+                        presenceStatus = p.presenceStatus
                     )
                 }.getOrNull()
             }.sortedBy { it.fullName.lowercase() }
 
+            Cache.putFriends(user.id, friends)
             Result.success(friends)
         } catch (e: Exception) {
-            Result.failure(e)
+            val userId = supabase.auth.currentUserOrNull()?.id
+            val cached = userId?.let { Cache.getFriends(it) }
+            if (cached != null) Result.success(cached) else Result.failure(e)
         }
     }
 
     suspend fun getPublicProfile(userId: String): Result<PublicProfileSnapshot> {
         return try {
-            DemoProfileDetailsDirectory.profileFor(userId)?.let { demo ->
-                return Result.success(demo)
+            Cache.getPublicProfile(userId)?.let { cached ->
+                return Result.success(cached)
             }
-
+            val viewer = supabase.auth.currentUserOrNull()
+                ?: return Result.failure(IllegalStateException("Not logged in"))
+            if (isBlockedRelationship(viewer.id, userId)) {
+                return Result.failure(IllegalStateException("Profile unavailable."))
+            }
             val p = supabase.from("profiles")
                 .select {
                     filter { eq("id", userId) }
@@ -776,6 +1272,7 @@ class ProfileRepository {
                     limit(8)
                 }
                 .decodeList<EventRow>()
+                .filter { it.visibility != "invite_only" }
 
             val invites = runCatching {
                 supabase.from("event_invites")
@@ -833,27 +1330,30 @@ class ProfileRepository {
                         .decodeSingle<ProfileRow>()
                     FriendListItem(
                         id = f.id,
-                        fullName = f.fullName?.ifBlank { f.username ?: "User" } ?: (f.username ?: "User"),
+                        fullName = f.displayName(),
                         username = f.username ?: "user",
-                        avatarUrl = f.avatarUrl
+                        avatarUrl = f.avatarUrl,
+                        presenceStatus = f.presenceStatus
                     )
                 }.getOrNull()
             }.sortedBy { it.fullName.lowercase() }
 
-            Result.success(
-                PublicProfileSnapshot(
-                    id = p.id,
-                    fullName = p.fullName?.ifBlank { p.username ?: "User" } ?: (p.username ?: "User"),
-                    username = p.username ?: "user",
-                    avatarUrl = p.avatarUrl,
-                    aboutMe = p.aboutMe?.ifBlank { "No bio yet." } ?: "No bio yet.",
-                    hostedEvents = hosted,
-                    attendedEvents = attended,
-                    friends = friends
-                )
+            val snapshot = PublicProfileSnapshot(
+                id = p.id,
+                fullName = p.displayName(),
+                username = p.username ?: "user",
+                avatarUrl = p.avatarUrl,
+                presenceStatus = p.presenceStatus,
+                aboutMe = p.aboutMe?.ifBlank { "No bio yet." } ?: "No bio yet.",
+                hostedEvents = hosted,
+                attendedEvents = attended,
+                friends = friends
             )
+            Cache.putPublicProfile(userId, snapshot)
+            Result.success(snapshot)
         } catch (e: Exception) {
-            Result.failure(e)
+            val cached = Cache.getPublicProfile(userId)
+            if (cached != null) Result.success(cached) else Result.failure(e)
         }
     }
 
@@ -866,7 +1366,6 @@ class ProfileRepository {
                 filter {
                     eq("sender_id", user.id)
                     eq("receiver_id", targetUserId)
-                    eq("status", "accepted")
                 }
             }
 
@@ -874,9 +1373,10 @@ class ProfileRepository {
                 filter {
                     eq("sender_id", targetUserId)
                     eq("receiver_id", user.id)
-                    eq("status", "accepted")
                 }
             }
+            Cache.clearFriendsFor(user.id)
+            Cache.clearPublicProfileFor(targetUserId)
 
             Result.success(Unit)
         } catch (e: Exception) {

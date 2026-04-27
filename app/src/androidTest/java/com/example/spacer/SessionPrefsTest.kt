@@ -26,6 +26,8 @@ class SessionPrefsTest {
         sp.saveAboutMe("Hello")
         sp.saveLocationLabel("Test City, 12345")
         sp.saveProfileImageUri("https://example.com/avatar.png")
+        sp.setDeviceCalendarReadEnabled(true)
+        sp.setCalendarConflictNotificationsEnabled(true)
 
         sp.setLoggedIn(false)
 
@@ -36,6 +38,8 @@ class SessionPrefsTest {
         assertEquals("", sp.getAboutMe())
         assertEquals("", sp.getLocationLabel())
         assertEquals(null, sp.getProfileImageUri())
+        assertEquals(false, sp.isDeviceCalendarReadEnabled())
+        assertEquals(false, sp.isCalendarConflictNotificationsEnabled())
     }
 
     @Test
