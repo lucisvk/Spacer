@@ -58,6 +58,13 @@ fun EventChatScreen(
     var currentUserAvatarUrl by remember { mutableStateOf<String?>(null) }
     var showedRealtimeFallbackToast by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    fun applyIfChanged(next: List<EventChatMessageUi>) {
+        val currentLast = messages.lastOrNull()?.id
+        val nextLast = next.lastOrNull()?.id
+        if (messages.size != next.size || currentLast != nextLast) {
+            messages = next
+        }
+    }
 
     LaunchedEffect(eventId) {
         currentUserId = SupabaseManager.client.auth.currentUserOrNull()?.id
@@ -70,7 +77,7 @@ fun EventChatScreen(
         }
         mode = withContext(Dispatchers.IO) { repo.getEventChatMode(eventId) }.getOrDefault("all_members")
         repo.subscribeEventChatMessages(eventId).collect { result ->
-            result.onSuccess { messages = it }
+            result.onSuccess { applyIfChanged(it) }
             result.onFailure {
                 if (!showedRealtimeFallbackToast) {
                     showedRealtimeFallbackToast = true
@@ -82,7 +89,7 @@ fun EventChatScreen(
     LaunchedEffect("event-chat-poll-$eventId") {
         while (true) {
             withContext(Dispatchers.IO) { repo.listEventChatMessages(eventId) }
-                .onSuccess { messages = it }
+                .onSuccess { applyIfChanged(it) }
             delay(1500L)
         }
     }
@@ -200,7 +207,7 @@ fun EventChatScreen(
                                     .onSuccess {
                                         draft = ""
                                         withContext(Dispatchers.IO) { repo.listEventChatMessages(eventId) }
-                                            .onSuccess { messages = it }
+                                            .onSuccess { applyIfChanged(it) }
                                         if (messages.isNotEmpty()) {
                                             listState.animateScrollToItem(messages.lastIndex)
                                         }
