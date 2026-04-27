@@ -4,6 +4,9 @@ import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,7 +33,17 @@ import coil.compose.AsyncImage
 internal fun AnimatedMessageRow(content: @Composable () -> Unit) {
     AnimatedVisibility(
         visible = true,
-        enter = fadeIn() + expandVertically()
+        enter = fadeIn(animationSpec = tween(durationMillis = 180)) +
+            slideInVertically(
+                initialOffsetY = { it / 3 },
+                animationSpec = tween(durationMillis = 220)
+            ) +
+            expandVertically(
+                animationSpec = spring(
+                    dampingRatio = 0.82f,
+                    stiffness = 500f
+                )
+            )
     ) {
         content()
     }

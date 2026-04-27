@@ -386,6 +386,7 @@ private object LocalDemoChatStore {
 class EventRepository {
     private val supabase = SupabaseManager.client
     private val notificationsRepo = NotificationsRepository()
+    private val profileCache = mutableMapOf<String, ProfileRow>()
 
     private fun parseDate(value: String): OffsetDateTime? = try {
         OffsetDateTime.parse(value)
@@ -396,6 +397,22 @@ class EventRepository {
     private fun displayName(profile: ProfileRow?, fallback: String = "User"): String {
         if (profile == null) return fallback
         return profile.fullName?.ifBlank { profile.username ?: fallback } ?: (profile.username ?: fallback)
+    }
+
+    private suspend fun getProfileCached(userId: String): ProfileRow? {
+        profileCache[userId]?.let { return it }
+        val profile = runCatching {
+            supabase.from("profiles")
+                .select {
+                    filter { eq("id", userId) }
+                    limit(1)
+                }
+                .decodeSingle<ProfileRow>()
+        }.getOrNull()
+        if (profile != null) {
+            profileCache[userId] = profile
+        }
+        return profile
     }
 
     private suspend fun currentUserIdOrDemo(): String {
@@ -631,14 +648,7 @@ class EventRepository {
                         .decodeSingle<EventRow>()
                 }.getOrNull() ?: return@mapNotNull null
                 if (event.hostId in blockedIds) return@mapNotNull null
-                val host = runCatching {
-                    supabase.from("profiles")
-                        .select {
-                            filter { eq("id", event.hostId) }
-                            limit(1)
-                        }
-                        .decodeSingle<ProfileRow>()
-                }.getOrNull()
+                val host = getProfileCached(event.hostId)
                 val hostName = host?.fullName?.ifBlank { null } ?: host?.username ?: "Host"
                 PendingInviteUi(
                     inviteId = inv.id,
@@ -826,15 +836,8 @@ class EventRepository {
                 }
                 .decodeList<AvailabilityRow>()
             val list = rows.mapNotNull { r ->
-                val p = runCatching {
-                    supabase.from("profiles")
-                        .select {
-                            filter { eq("id", r.userId) }
-                            limit(1)
-                        }
-                        .decodeSingle<ProfileRow>()
-                }.getOrNull()
-                val name = p?.fullName?.ifBlank { null } ?: p?.username ?: r.userId.take(8)
+                val p = getProfileCached(r.userId)
+                val name = p?.fullName?.ifBlank { null } ?: p?.username ?: "User"
                 AvailabilityEntryUi(
                     userId = r.userId,
                     displayName = name,
@@ -1112,14 +1115,7 @@ class EventRepository {
                 }
                 .decodeList<EventChatMessageRow>()
             val out = rows.map { row ->
-                val profile = runCatching {
-                    supabase.from("profiles")
-                        .select {
-                            filter { eq("id", row.senderId) }
-                            limit(1)
-                        }
-                        .decodeSingle<ProfileRow>()
-                }.getOrNull()
+                val profile = getProfileCached(row.senderId)
                 val name = displayName(profile)
                 val role = roleByUser[row.senderId]?.role ?: "attendee"
                 EventChatMessageUi(
@@ -1282,14 +1278,7 @@ class EventRepository {
                 .filter { user.id == it.userA || user.id == it.userB }
             val threads = rows.mapNotNull { row ->
                 val peerId = if (row.userA == user.id) row.userB else row.userA
-                val p = runCatching {
-                    supabase.from("profiles")
-                        .select {
-                            filter { eq("id", peerId) }
-                            limit(1)
-                        }
-                        .decodeSingle<ProfileRow>()
-                }.getOrNull() ?: return@mapNotNull null
+                val p = getProfileCached(peerId) ?: return@mapNotNull null
                 val latestMessage = runCatching {
                     supabase.from("dm_messages")
                         .select {
@@ -1301,14 +1290,7 @@ class EventRepository {
                         .firstOrNull()
                 }.getOrNull()
                 val latestSenderName = latestMessage?.let { latest ->
-                    runCatching {
-                        supabase.from("profiles")
-                            .select {
-                                filter { eq("id", latest.senderId) }
-                                limit(1)
-                            }
-                            .decodeSingle<ProfileRow>()
-                    }.getOrNull()?.let { sender ->
+                    getProfileCached(latest.senderId)?.let { sender ->
                         displayName(sender)
                     }
                 }
@@ -1341,14 +1323,7 @@ class EventRepository {
                 }
                 .decodeList<DmMessageRow>()
             val out = rows.map { row ->
-                val p = runCatching {
-                    supabase.from("profiles")
-                        .select {
-                            filter { eq("id", row.senderId) }
-                            limit(1)
-                        }
-                        .decodeSingle<ProfileRow>()
-                }.getOrNull()
+                val p = getProfileCached(row.senderId)
                 DmMessageUi(
                     id = row.id,
                     senderId = row.senderId,
@@ -1483,14 +1458,7 @@ class EventRepository {
                 }
                 .decodeList<EventMemberRow>()
             val out = members.mapNotNull { m ->
-                val p = runCatching {
-                    supabase.from("profiles")
-                        .select {
-                            filter { eq("id", m.userId) }
-                            limit(1)
-                        }
-                        .decodeSingle<ProfileRow>()
-                }.getOrNull() ?: return@mapNotNull null
+                val p = getProfileCached(m.userId) ?: return@mapNotNull null
                 ChatPresenceUi(
                     userId = m.userId,
                     displayName = displayName(p),
@@ -1531,14 +1499,7 @@ class EventRepository {
                 }
                 .decodeList<EventBringItemClaimRow>()
             val out = rows.map { row ->
-                val profile = runCatching {
-                    supabase.from("profiles")
-                        .select {
-                            filter { eq("id", row.claimedBy) }
-                            limit(1)
-                        }
-                        .decodeSingle<ProfileRow>()
-                }.getOrNull()
+                val profile = getProfileCached(row.claimedBy)
                 BringItemClaimUi(
                     itemKey = row.itemKey,
                     itemLabel = row.itemLabel,

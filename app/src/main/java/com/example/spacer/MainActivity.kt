@@ -61,8 +61,17 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.example.spacer.Navigation.SpacerAppScaffold
 import com.example.spacer.events.CalendarConflictNotifier
+import com.example.spacer.events.NotificationSyncWorker
 import com.example.spacer.events.NotificationsRepository
 import com.example.spacer.events.TodayEventNotifier
 import com.example.spacer.events.UserNotificationDispatcher
@@ -85,6 +94,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.TimeUnit
 
 private object Routes {
     const val Splash = "splash"
@@ -111,6 +121,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
+        scheduleNotificationSyncWorkers()
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (isActive) {
@@ -159,6 +170,31 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Ensures PKCE / OAuth return is processed if the intent was delivered here.
         SupabaseManager.client.handleDeeplinks(intent)
+    }
+
+    private fun scheduleNotificationSyncWorkers() {
+        val workManager = WorkManager.getInstance(this)
+        val periodic = PeriodicWorkRequestBuilder<NotificationSyncWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+        workManager.enqueueUniquePeriodicWork(
+            "spacer_notification_sync_periodic",
+            ExistingPeriodicWorkPolicy.UPDATE,
+            periodic
+        )
+
+        val immediate = OneTimeWorkRequestBuilder<NotificationSyncWorker>()
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .build()
+        workManager.enqueueUniqueWork(
+            "spacer_notification_sync_now",
+            ExistingWorkPolicy.REPLACE,
+            immediate
+        )
     }
 }
 

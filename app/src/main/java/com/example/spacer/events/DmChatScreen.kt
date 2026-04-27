@@ -58,6 +58,13 @@ fun DmChatScreen(
     var currentUserId by remember { mutableStateOf<String?>(null) }
     var showedRealtimeFallbackToast by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    fun applyIfChanged(next: List<DmMessageUi>) {
+        val currentLast = messages.lastOrNull()?.id
+        val nextLast = next.lastOrNull()?.id
+        if (messages.size != next.size || currentLast != nextLast) {
+            messages = next
+        }
+    }
 
     LaunchedEffect(peerUserId) {
         currentUserId = SupabaseManager.client.auth.currentUserOrNull()?.id
@@ -73,7 +80,7 @@ fun DmChatScreen(
         }
         conversationId = cid
         repo.subscribeDmMessages(cid).collect { result ->
-            result.onSuccess { messages = it }
+            result.onSuccess { applyIfChanged(it) }
             result.onFailure {
                 if (!showedRealtimeFallbackToast) {
                     showedRealtimeFallbackToast = true
@@ -87,7 +94,7 @@ fun DmChatScreen(
             val cid = conversationId
             if (cid != null) {
                 withContext(Dispatchers.IO) { repo.listDmMessages(cid) }
-                    .onSuccess { messages = it }
+                    .onSuccess { applyIfChanged(it) }
             }
             delay(1500L)
         }
@@ -167,7 +174,7 @@ fun DmChatScreen(
                             .onSuccess {
                                 draft = ""
                                 withContext(Dispatchers.IO) { repo.listDmMessages(cid) }
-                                    .onSuccess { messages = it }
+                                    .onSuccess { applyIfChanged(it) }
                                 if (messages.isNotEmpty()) {
                                     listState.animateScrollToItem(messages.lastIndex)
                                 }
